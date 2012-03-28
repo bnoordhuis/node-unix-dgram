@@ -1,5 +1,9 @@
 {
-  "author": "Ben Noordhuis <info@bnoordhuis.nl> (http://bnoordhuis.nl/)",
+  "author": {
+    "name": "Ben Noordhuis",
+    "email": "info@bnoordhuis.nl",
+    "url": "http://bnoordhuis.nl/"
+  },
   "name": "unix-dgram",
   "version": "0.0.1",
   "description": "Unix datagram socket",
