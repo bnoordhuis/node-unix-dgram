@@ -1,6 +1,6 @@
 SOCKNAME = '/tmp/unix_dgram.sock';
 
-var unix = require('../build/default/unix_dgram');
+var unix = require('../src/unix_dgram');
 
 var server = unix.createSocket('unix_dgram', function(buf, rinfo) {
   console.error('server recv', arguments);
