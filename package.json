@@ -9,6 +9,10 @@
   "description": "Unix datagram socket",
   "main": "src/unix_dgram",
   "homepage": "https://github.com/bnoordhuis/node-unix-dgram/",
+  "license": {
+    "type": "ISC",
+    "url": "https://github.com/bnoordhuis/node-unix-dgram/LICENSE"
+  },
   "repository": {
     "type": "git",
     "url": "git://github.com/bnoordhuis/node-unix-dgram.git"
