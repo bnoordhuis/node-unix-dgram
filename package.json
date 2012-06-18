@@ -5,10 +5,10 @@
     "url": "http://bnoordhuis.nl/"
   },
   "name": "unix-dgram",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Unix datagram socket",
   "main": "src/unix_dgram",
-  "homepage": "https://github.com/bnoordhuis/node-unix-dgram/",
+  "homepage": "https://github.com/bnoordhuis/node-unix-dgram",
   "license": {
     "type": "ISC",
     "url": "https://github.com/bnoordhuis/node-unix-dgram/LICENSE"
@@ -17,11 +17,8 @@
     "type": "git",
     "url": "git://github.com/bnoordhuis/node-unix-dgram.git"
   },
-  "scripts": {
-    "preinstall": "node-waf configure build"
-  },
   "engines": {
-    "node": ">= 0.4.0"
+    "node": ">=0.7.9"
   },
   "dependencies": {},
   "devDependencies": {},

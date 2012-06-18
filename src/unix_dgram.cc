@@ -1,9 +1,13 @@
 // -D_GNU_SOURCE makes SOCK_NONBLOCK etc. available on linux
-#ifndef _GNU_SOURCE
+#undef  _GNU_SOURCE
 #define _GNU_SOURCE
-#endif
+
+#include "uv.h"
+#include "node.h"
+#include "node_buffer.h"
 
 #include <errno.h>
+#include <stddef.h>
 #include <unistd.h>
 #include <fcntl.h>
 
@@ -14,22 +18,26 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
-#include <node.h>
-#include <node_buffer.h>
-
 #include <map>
+
+#define offset_of(type, member)                                               \
+  ((intptr_t) ((char *) &(((type *) 8)->member) - 8))
+
+#define container_of(ptr, type, member)                                       \
+  ((type *) ((char *) (ptr) - offset_of(type, member)))
 
 using namespace v8;
 using namespace node;
 
 namespace {
 
-typedef std::map<int, ev_io*> watchers_t;
-
 struct SocketContext {
   Persistent<Function> cb_;
+  uv_poll_t handle_;
   int fd_;
 };
+
+typedef std::map<int, SocketContext*> watchers_t;
 
 
 Persistent<String> errno_symbol;
@@ -67,7 +75,7 @@ void SetErrno(int errorno) {
 }
 
 
-void OnRecv(EV_P_ ev_io* w, int revents) {
+void OnRecv(uv_poll_t* handle, int status, int events) {
   HandleScope scope;
   Handle<Value> argv[3];
   sockaddr_storage ss;
@@ -78,14 +86,14 @@ void OnRecv(EV_P_ ev_io* w, int revents) {
   int size;
   int r;
 
+  sc = container_of(handle, SocketContext, handle_);
+
   r = -1;
   buf = NULL;
   argv[0] = argv[1] = argv[2] = Null();
 
-  assert(!(revents & ~EV_READ));
-
-  sc = reinterpret_cast<SocketContext*>(w->data);
-  assert(sc != NULL);
+  assert(0 == status);
+  assert(0 == (events & ~UV_READABLE));
 
   if ((r = ioctl(sc->fd_, FIONREAD, &size)) == -1) {
     SetErrno(errno);
@@ -131,13 +139,11 @@ void StartWatcher(int fd, Handle<Value> callback) {
   sc->cb_ = Persistent<Function>::New(callback.As<Function>());
   sc->fd_ = fd;
 
-  ev_io* w = new ev_io;
-  ev_io_init(w, OnRecv, fd, EV_READ);
-  w->data = reinterpret_cast<void*>(sc);
-  ev_io_start(EV_DEFAULT_UC_ w);
+  uv_poll_init(uv_default_loop(), &sc->handle_, fd);
+  uv_poll_start(&sc->handle_, UV_READABLE, OnRecv);
 
   // so we can disarm the watcher when close(fd) is called
-  watchers.insert(watchers_t::value_type(fd, w));
+  watchers.insert(watchers_t::value_type(fd, sc));
 }
 
 
@@ -145,16 +151,13 @@ void StopWatcher(int fd) {
   watchers_t::iterator iter = watchers.find(fd);
   assert(iter != watchers.end());
 
-  ev_io* w = iter->second;
-  SocketContext* sc = reinterpret_cast<SocketContext*>(w->data);
+  SocketContext* sc = iter->second;
   sc->cb_.Dispose();
   sc->cb_.Clear();
 
-  ev_io_stop(EV_DEFAULT_UC_ w);
+  uv_poll_stop(&sc->handle_);
   watchers.erase(iter);
-
   delete sc;
-  delete w;
 }
 
 
