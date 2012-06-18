@@ -104,10 +104,12 @@ void OnRecv(EV_P_ ev_io* w, int revents) {
   msg.msg_name = &ss;
   msg.msg_namelen = sizeof ss;
 
-  if ((r = recvmsg(sc->fd_, &msg, 0)) == -1) {
+  do
+    r = recvmsg(sc->fd_, &msg, 0);
+  while (r == -1 && errno == EINTR);
+
+  if (r == -1)
     SetErrno(errno);
-    goto err;
-  }
 
 err:
   argv[0] = Integer::New(r);
@@ -254,7 +256,11 @@ Handle<Value> Send(const Arguments& args) {
   msg.msg_name = reinterpret_cast<void*>(&sun);
   msg.msg_namelen = sizeof sun;
 
-  if ((r = sendmsg(fd, &msg, 0)) == -1)
+  do
+    r = sendmsg(fd, &msg, 0);
+  while (r == -1 && errno == EINTR);
+
+  if (r == -1)
     SetErrno(errno);
 
   return scope.Close(Integer::New(r));
@@ -269,12 +275,9 @@ Handle<Value> Close(const Arguments& args) {
   assert(args.Length() == 1);
 
   fd = args[0]->Int32Value();
-  do {
-    r = close(fd);
-  }
-  while (r == -1 && errno == EINTR);
+  r = close(fd);
 
-  if (r)
+  if (r == -1)
     SetErrno(errno);
 
   StopWatcher(fd);
