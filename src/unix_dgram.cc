@@ -11,7 +11,6 @@
 #include <unistd.h>
 #include <fcntl.h>
 
-#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -97,8 +96,8 @@ void OnRecv(uv_poll_t* handle, int status, int events) {
   Buffer* buf;
   msghdr msg;
   iovec iov;
-  int size;
-  int r;
+  ssize_t r;
+  char scratch[65536];
 
   sc = container_of(handle, SocketContext, handle_);
 
@@ -109,16 +108,8 @@ void OnRecv(uv_poll_t* handle, int status, int events) {
   assert(0 == status);
   assert(0 == (events & ~UV_READABLE));
 
-  if ((r = ioctl(sc->fd_, FIONREAD, &size)) == -1) {
-    SetErrno(errno);
-    goto err;
-  }
-
-  buf = Buffer::New(size);
-  argv[1] = buf->handle_;
-
-  iov.iov_base = Buffer::Data(buf);
-  iov.iov_len = size;
+  iov.iov_base = scratch;
+  iov.iov_len = sizeof scratch;
 
   memset(&msg, 0, sizeof msg);
   msg.msg_iovlen = 1;
@@ -130,8 +121,13 @@ void OnRecv(uv_poll_t* handle, int status, int events) {
     r = recvmsg(sc->fd_, &msg, 0);
   while (r == -1 && errno == EINTR);
 
-  if (r == -1)
+  if (r == -1) {
     SetErrno(errno);
+    goto err;
+  }
+
+  buf = Buffer::New(scratch, r);
+  argv[1] = buf->handle_;
 
 err:
   argv[0] = Integer::New(r);
