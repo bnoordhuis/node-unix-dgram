@@ -26,10 +26,24 @@
 #define container_of(ptr, type, member)                                       \
   ((type *) ((char *) (ptr) - offset_of(type, member)))
 
-using namespace v8;
-using namespace node;
-
 namespace {
+
+using node::Buffer;
+using node::FatalException;
+using v8::Arguments;
+using v8::Context;
+using v8::Function;
+using v8::FunctionTemplate;
+using v8::Handle;
+using v8::HandleScope;
+using v8::Integer;
+using v8::Local;
+using v8::Null;
+using v8::Object;
+using v8::Persistent;
+using v8::String;
+using v8::TryCatch;
+using v8::Value;
 
 struct SocketContext {
   Persistent<Function> cb_;
