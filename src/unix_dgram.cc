@@ -214,7 +214,7 @@ out:
 
 Handle<Value> Bind(const Arguments& args) {
   HandleScope scope;
-  sockaddr_un sun;
+  sockaddr_un s_un;
   int fd;
   int r;
 
@@ -223,11 +223,11 @@ Handle<Value> Bind(const Arguments& args) {
   fd = args[0]->Int32Value();
   String::Utf8Value path(args[1]);
 
-  strncpy(sun.sun_path, *path, sizeof(sun.sun_path) - 1);
-  sun.sun_path[sizeof(sun.sun_path) - 1] = '\0';
-  sun.sun_family = AF_UNIX;
+  strncpy(s_un.sun_path, *path, sizeof(s_un.sun_path) - 1);
+  s_un.sun_path[sizeof(s_un.sun_path) - 1] = '\0';
+  s_un.sun_family = AF_UNIX;
 
-  if ((r = bind(fd, reinterpret_cast<sockaddr*>(&sun), sizeof sun)) == -1)
+  if ((r = bind(fd, reinterpret_cast<sockaddr*>(&s_un), sizeof s_un)) == -1)
     SetErrno(errno);
 
   return scope.Close(Integer::New(r));
@@ -237,7 +237,7 @@ Handle<Value> Bind(const Arguments& args) {
 Handle<Value> Send(const Arguments& args) {
   HandleScope scope;
   Local<Object> buf;
-  sockaddr_un sun;
+  sockaddr_un s_un;
   size_t offset;
   size_t length;
   msghdr msg;
@@ -259,15 +259,15 @@ Handle<Value> Send(const Arguments& args) {
   iov.iov_base = Buffer::Data(buf) + offset;
   iov.iov_len = length;
 
-  strncpy(sun.sun_path, *path, sizeof(sun.sun_path) - 1);
-  sun.sun_path[sizeof(sun.sun_path) - 1] = '\0';
-  sun.sun_family = AF_UNIX;
+  strncpy(s_un.sun_path, *path, sizeof(s_un.sun_path) - 1);
+  s_un.sun_path[sizeof(s_un.sun_path) - 1] = '\0';
+  s_un.sun_family = AF_UNIX;
 
   memset(&msg, 0, sizeof msg);
   msg.msg_iovlen = 1;
   msg.msg_iov = &iov;
-  msg.msg_name = reinterpret_cast<void*>(&sun);
-  msg.msg_namelen = sizeof sun;
+  msg.msg_name = reinterpret_cast<void*>(&s_un);
+  msg.msg_namelen = sizeof s_un;
 
   do
     r = sendmsg(fd, &msg, 0);
