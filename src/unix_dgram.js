@@ -5,13 +5,14 @@ var util = require('util');
 /*
  * For some reason node-waf outputs the binding to different directories under node.js 0.4 and 0.6:
  */
-var binding;
+var binding = require('unix_dgram.node');
+/*
 try {
     binding = require(__dirname + '/../build/Release/unix_dgram.node');
 } catch (e) {
     binding = require(__dirname + '/../build/default/unix_dgram.node');
 }
-
+*/
 var SOCK_DGRAM  = binding.SOCK_DGRAM;
 var AF_UNIX     = binding.AF_UNIX;
 
@@ -62,7 +63,7 @@ util.inherits(Socket, events.EventEmitter);
 
 
 Socket.prototype.bind = function(path) {
-  if (bind(this.fd, path) == -1)
+  if (this.id == -1 || bind(this.fd, path) == -1)
     this.emit('error', errnoException(errno, 'bind'));
   else
     this.emit('listening');
@@ -71,7 +72,7 @@ Socket.prototype.bind = function(path) {
 
 Socket.prototype.send = function(buf, offset, length, path, callback) {
   // FIXME defer error and callback to next tick?
-  if (send(this.fd, buf, offset, length, path) == -1)
+  if (this.id == -1 || send(this.fd, buf, offset, length, path) == -1)
     this.emit('error', errnoException(errno, 'send'));
   else
     callback();
@@ -85,9 +86,10 @@ Socket.prototype.sendto = function(buf, offset, length, path, callback) {
 
 
 Socket.prototype.close = function() {
-  if (close(this.fd) == -1)
+  if (this.fd == -1) {
     throw new errnoException(errno, 'close');
-
+  }
+  close(this.fd);
   this.fd = -1;
 };
 

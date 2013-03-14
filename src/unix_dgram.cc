@@ -19,12 +19,6 @@
 
 #include <map>
 
-#define offset_of(type, member)                                               \
-  ((intptr_t) ((char *) &(((type *) 8)->member) - 8))
-
-#define container_of(ptr, type, member)                                       \
-  ((type *) ((char *) (ptr) - offset_of(type, member)))
-
 namespace {
 
 using node::Buffer;
@@ -43,14 +37,14 @@ using v8::Persistent;
 using v8::String;
 using v8::TryCatch;
 using v8::Value;
+using v8::Undefined;
 
 struct SocketContext {
   Persistent<Function> cb_;
-  uv_poll_t handle_;
   int fd_;
 };
 
-typedef std::map<int, SocketContext*> watchers_t;
+typedef std::map<int, uv_poll_t*> watchers_t;
 
 
 Persistent<String> errno_symbol;
@@ -90,8 +84,7 @@ void SetErrno(int errorno) {
 
 void OnRecv(uv_poll_t* handle, int status, int events) {
   HandleScope scope;
-  Handle<Value> argv[3];
-  sockaddr_storage ss;
+  Handle<Value> argv[2];
   SocketContext* sc;
   Buffer* buf;
   msghdr msg;
@@ -99,23 +92,20 @@ void OnRecv(uv_poll_t* handle, int status, int events) {
   ssize_t r;
   char scratch[65536];
 
-  sc = container_of(handle, SocketContext, handle_);
+  sc = (SocketContext *)handle->data;
 
-  r = -1;
-  buf = NULL;
-  argv[0] = argv[1] = argv[2] = Null();
+  argv[0] = argv[1] = Null();
 
   assert(0 == status);
   assert(0 == (events & ~UV_READABLE));
 
+  memset(&iov, 0, sizeof iov);
   iov.iov_base = scratch;
   iov.iov_len = sizeof scratch;
 
   memset(&msg, 0, sizeof msg);
   msg.msg_iovlen = 1;
   msg.msg_iov = &iov;
-  msg.msg_name = &ss;
-  msg.msg_namelen = sizeof ss;
 
   do
     r = recvmsg(sc->fd_, &msg, 0);
@@ -148,12 +138,20 @@ void StartWatcher(int fd, Handle<Value> callback) {
   SocketContext* sc = new SocketContext;
   sc->cb_ = Persistent<Function>::New(callback.As<Function>());
   sc->fd_ = fd;
-
-  uv_poll_init(uv_default_loop(), &sc->handle_, fd);
-  uv_poll_start(&sc->handle_, UV_READABLE, OnRecv);
+  uv_poll_t* handle = new uv_poll_t;
+  handle->data = sc;
 
   // so we can disarm the watcher when close(fd) is called
-  watchers.insert(watchers_t::value_type(fd, sc));
+  watchers.insert(watchers_t::value_type(fd, handle));
+
+  uv_poll_init(uv_default_loop(), handle, fd);
+  uv_poll_start(handle, UV_READABLE, OnRecv);
+  uv_unref((uv_handle_t *)handle);
+}
+
+
+static void OnHandleClose(uv_handle_t* handle) {
+  delete handle;
 }
 
 
@@ -161,11 +159,13 @@ void StopWatcher(int fd) {
   watchers_t::iterator iter = watchers.find(fd);
   assert(iter != watchers.end());
 
-  SocketContext* sc = iter->second;
+  uv_poll_t* handle = iter->second;
+  SocketContext* sc = (SocketContext *)handle->data;
+  uv_poll_stop(handle);
+  uv_close((uv_handle_t *)handle, OnHandleClose);
+  uv_ref((uv_handle_t *)handle);
   sc->cb_.Dispose();
-  sc->cb_.Clear();
 
-  uv_poll_stop(&sc->handle_);
   watchers.erase(iter);
   delete sc;
 }
@@ -256,6 +256,7 @@ Handle<Value> Send(const Arguments& args) {
   assert(Buffer::HasInstance(buf));
   assert(offset + length <= Buffer::Length(buf));
 
+  memset(&iov, 0, sizeof iov);
   iov.iov_base = Buffer::Data(buf) + offset;
   iov.iov_len = length;
 
@@ -267,7 +268,7 @@ Handle<Value> Send(const Arguments& args) {
   msg.msg_iovlen = 1;
   msg.msg_iov = &iov;
   msg.msg_name = reinterpret_cast<void*>(&sun);
-  msg.msg_namelen = sizeof sun;
+  msg.msg_namelen = SUN_LEN(&sun);
 
   do
     r = sendmsg(fd, &msg, 0);
@@ -283,19 +284,14 @@ Handle<Value> Send(const Arguments& args) {
 Handle<Value> Close(const Arguments& args) {
   HandleScope scope;
   int fd;
-  int r;
 
   assert(args.Length() == 1);
 
   fd = args[0]->Int32Value();
-  r = close(fd);
-
-  if (r == -1)
-    SetErrno(errno);
 
   StopWatcher(fd);
 
-  return scope.Close(Integer::New(r));
+  return Undefined();
 }
 
 
