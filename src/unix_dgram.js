@@ -2,14 +2,11 @@ var events = require('events');
 var dgram = require('dgram');
 var util = require('util');
 
-/*
- * For some reason node-waf outputs the binding to different directories under node.js 0.4 and 0.6:
- */
 var binding;
 try {
-    binding = require(__dirname + '/../build/Release/unix_dgram.node');
+  binding = require(__dirname + '/../build/Release/unix_dgram.node');
 } catch (e) {
-    binding = require(__dirname + '/../build/default/unix_dgram.node');
+  binding = require(__dirname + '/../build/Debug/unix_dgram.node');
 }
 
 var SOCK_DGRAM  = binding.SOCK_DGRAM;

@@ -5,7 +5,7 @@
     "url": "http://bnoordhuis.nl/"
   },
   "name": "unix-dgram",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Unix datagram socket",
   "main": "src/unix_dgram",
   "homepage": "https://github.com/bnoordhuis/node-unix-dgram",
