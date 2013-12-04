@@ -1,13 +1,7 @@
 var events = require('events');
 var dgram = require('dgram');
 var util = require('util');
-
-var binding;
-try {
-  binding = require(__dirname + '/../build/Release/unix_dgram.node');
-} catch (e) {
-  binding = require(__dirname + '/../build/Debug/unix_dgram.node');
-}
+var binding = require('bindings')('unix_dgram.node');
 
 var SOCK_DGRAM  = binding.SOCK_DGRAM;
 var AF_UNIX     = binding.AF_UNIX;

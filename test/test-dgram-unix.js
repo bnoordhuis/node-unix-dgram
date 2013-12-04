@@ -15,7 +15,7 @@ process.on('exit', function() {
 try { fs.unlinkSync(SOCKNAME); } catch (e) { /* swallow */ }
 
 var server = unix.createSocket('unix_dgram', function(buf, rinfo) {
-  console.error('server recv', arguments);
+  console.error('server recv', '' + buf, arguments);
   assert.equal('' + buf, 'PING');
   seenPing = true;
   server.close();

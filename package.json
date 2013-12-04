@@ -5,7 +5,7 @@
     "url": "http://bnoordhuis.nl/"
   },
   "name": "unix-dgram",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "Unix datagram socket",
   "main": "src/unix_dgram",
   "homepage": "https://github.com/bnoordhuis/node-unix-dgram",
@@ -20,7 +20,13 @@
   "engines": {
     "node": ">=0.7.9"
   },
-  "dependencies": {},
+  "dependencies": {
+    "bindings": "~1.1.1",
+    "nan": "~0.7.0"
+  },
   "devDependencies": {},
-  "optionalDependencies": {}
+  "optionalDependencies": {},
+  "scripts": {
+    "test": "node test/*.js"
+  }
 }
