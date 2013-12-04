@@ -2,9 +2,7 @@
 #undef  _GNU_SOURCE
 #define _GNU_SOURCE
 
-#include "uv.h"
-#include "node.h"
-#include "node_buffer.h"
+#include <nan.h>
 
 #include <errno.h>
 #include <stddef.h>
@@ -27,14 +25,11 @@
 
 namespace {
 
-using node::Buffer;
 using node::FatalException;
-using v8::Arguments;
 using v8::Context;
 using v8::Function;
 using v8::FunctionTemplate;
 using v8::Handle;
-using v8::HandleScope;
 using v8::Integer;
 using v8::Local;
 using v8::Null;
@@ -84,16 +79,15 @@ void SetCloExec(int fd) {
 void SetErrno(int errorno) {
   // set errno in the global context, this is the technique
   // that node uses to propagate system level errors to JS land
-  Context::GetCurrent()->Global()->Set(errno_symbol, Integer::New(errorno));
+  Context::GetCurrent()->Global()->Set(NanSymbol("errno"), Integer::New(errorno));
 }
 
 
 void OnRecv(uv_poll_t* handle, int status, int events) {
-  HandleScope scope;
+  NanScope();
   Handle<Value> argv[3];
   sockaddr_storage ss;
   SocketContext* sc;
-  Buffer* buf;
   msghdr msg;
   iovec iov;
   ssize_t r;
@@ -102,7 +96,6 @@ void OnRecv(uv_poll_t* handle, int status, int events) {
   sc = container_of(handle, SocketContext, handle_);
 
   r = -1;
-  buf = NULL;
   argv[0] = argv[1] = argv[2] = Null();
 
   assert(0 == status);
@@ -126,17 +119,16 @@ void OnRecv(uv_poll_t* handle, int status, int events) {
     goto err;
   }
 
-  buf = Buffer::New(scratch, r);
-  argv[1] = buf->handle_;
+  argv[1] = NanNewBufferHandle(scratch, r);
 
 err:
   argv[0] = Integer::New(r);
 
   TryCatch tc;
 
-  sc->cb_->Call(Context::GetCurrent()->Global(),
-                sizeof(argv) / sizeof(argv[0]),
-                argv);
+  NanPersistentToLocal(sc->cb_)->Call(Context::GetCurrent()->Global(),
+                                      sizeof(argv) / sizeof(argv[0]),
+                                      argv);
 
   if (tc.HasCaught())
     FatalException(tc);
@@ -146,7 +138,7 @@ err:
 void StartWatcher(int fd, Handle<Value> callback) {
   // start listening for incoming dgrams
   SocketContext* sc = new SocketContext;
-  sc->cb_ = Persistent<Function>::New(callback.As<Function>());
+  NanAssignPersistent(Function, sc->cb_, callback.As<Function>());
   sc->fd_ = fd;
 
   uv_poll_init(uv_default_loop(), &sc->handle_, fd);
@@ -162,8 +154,7 @@ void StopWatcher(int fd) {
   assert(iter != watchers.end());
 
   SocketContext* sc = iter->second;
-  sc->cb_.Dispose();
-  sc->cb_.Clear();
+  NanDispose(sc->cb_);
 
   uv_poll_stop(&sc->handle_);
   watchers.erase(iter);
@@ -171,8 +162,8 @@ void StopWatcher(int fd) {
 }
 
 
-Handle<Value> Socket(const Arguments& args) {
-  HandleScope scope;
+NAN_METHOD(Socket) {
+  NanScope();
   Local<Value> cb;
   int protocol;
   int domain;
@@ -208,12 +199,12 @@ Handle<Value> Socket(const Arguments& args) {
   StartWatcher(fd, cb);
 
 out:
-  return scope.Close(Integer::New(fd));
+  NanReturnValue(Integer::New(fd));
 }
 
 
-Handle<Value> Bind(const Arguments& args) {
-  HandleScope scope;
+NAN_METHOD(Bind) {
+  NanScope();
   sockaddr_un sun;
   int fd;
   int r;
@@ -230,12 +221,12 @@ Handle<Value> Bind(const Arguments& args) {
   if ((r = bind(fd, reinterpret_cast<sockaddr*>(&sun), sizeof sun)) == -1)
     SetErrno(errno);
 
-  return scope.Close(Integer::New(r));
+  NanReturnValue(Integer::New(r));
 }
 
 
-Handle<Value> Send(const Arguments& args) {
-  HandleScope scope;
+NAN_METHOD(Send) {
+  NanScope();
   Local<Object> buf;
   sockaddr_un sun;
   size_t offset;
@@ -253,10 +244,10 @@ Handle<Value> Send(const Arguments& args) {
   length = args[3]->Uint32Value();
   String::Utf8Value path(args[4]);
 
-  assert(Buffer::HasInstance(buf));
-  assert(offset + length <= Buffer::Length(buf));
+  assert(node::Buffer::HasInstance(buf));
+  assert(offset + length <= node::Buffer::Length(buf));
 
-  iov.iov_base = Buffer::Data(buf) + offset;
+  iov.iov_base = node::Buffer::Data(buf) + offset;
   iov.iov_len = length;
 
   strncpy(sun.sun_path, *path, sizeof(sun.sun_path) - 1);
@@ -276,12 +267,12 @@ Handle<Value> Send(const Arguments& args) {
   if (r == -1)
     SetErrno(errno);
 
-  return scope.Close(Integer::New(r));
+  NanReturnValue(Integer::New(r));
 }
 
 
-Handle<Value> Close(const Arguments& args) {
-  HandleScope scope;
+NAN_METHOD(Close) {
+  NanScope();
   int fd;
   int r;
 
@@ -295,27 +286,25 @@ Handle<Value> Close(const Arguments& args) {
 
   StopWatcher(fd);
 
-  return scope.Close(Integer::New(r));
+  NanReturnValue(Integer::New(r));
 }
 
 
 void Initialize(Handle<Object> target) {
-  errno_symbol = Persistent<String>::New(String::NewSymbol("errno"));
-
   // don't need to be read-only, only used by the JS shim
-  target->Set(String::NewSymbol("AF_UNIX"), Integer::New(AF_UNIX));
-  target->Set(String::NewSymbol("SOCK_DGRAM"), Integer::New(SOCK_DGRAM));
+  target->Set(NanSymbol("AF_UNIX"), Integer::New(AF_UNIX));
+  target->Set(NanSymbol("SOCK_DGRAM"), Integer::New(SOCK_DGRAM));
 
-  target->Set(String::NewSymbol("socket"),
+  target->Set(NanSymbol("socket"),
               FunctionTemplate::New(Socket)->GetFunction());
 
-  target->Set(String::NewSymbol("bind"),
+  target->Set(NanSymbol("bind"),
               FunctionTemplate::New(Bind)->GetFunction());
 
-  target->Set(String::NewSymbol("send"),
+  target->Set(NanSymbol("send"),
               FunctionTemplate::New(Send)->GetFunction());
 
-  target->Set(String::NewSymbol("close"),
+  target->Set(NanSymbol("close"),
               FunctionTemplate::New(Close)->GetFunction());
 }
 
