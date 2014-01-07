@@ -74,13 +74,6 @@ void SetCloExec(int fd) {
 }
 
 
-void SetErrno(int errorno) {
-  // set errno in the global context, this is the technique
-  // that node uses to propagate system level errors to JS land
-  Context::GetCurrent()->Global()->Set(NanSymbol("errno"), Integer::New(errorno));
-}
-
-
 void OnRecv(uv_poll_t* handle, int status, int events) {
   NanScope();
   Handle<Value> argv[3];
@@ -88,12 +81,10 @@ void OnRecv(uv_poll_t* handle, int status, int events) {
   SocketContext* sc;
   msghdr msg;
   iovec iov;
-  ssize_t r;
+  ssize_t err;
   char scratch[65536];
 
   sc = container_of(handle, SocketContext, handle_);
-
-  r = -1;
   argv[0] = argv[1] = argv[2] = Null();
 
   assert(0 == status);
@@ -109,21 +100,17 @@ void OnRecv(uv_poll_t* handle, int status, int events) {
   msg.msg_namelen = sizeof ss;
 
   do
-    r = recvmsg(sc->fd_, &msg, 0);
-  while (r == -1 && errno == EINTR);
+    err = recvmsg(sc->fd_, &msg, 0);
+  while (err == -1 && errno == EINTR);
 
-  if (r == -1) {
-    SetErrno(errno);
-    goto err;
-  }
+  if (err == -1)
+    err = -errno;
+  else
+    argv[1] = NanNewBufferHandle(scratch, err);
 
-  argv[1] = NanNewBufferHandle(scratch, r);
-
-err:
-  argv[0] = Integer::New(r);
+  argv[0] = Integer::New(err);
 
   TryCatch tc;
-
   NanPersistentToLocal(sc->cb_)->Call(Context::GetCurrent()->Global(),
                                       sizeof(argv) / sizeof(argv[0]),
                                       argv);
@@ -182,12 +169,13 @@ NAN_METHOD(Socket) {
   type |= SOCK_CLOEXEC;
 #endif
 
-  if ((fd = socket(domain, type, protocol)) == -1) {
-    SetErrno(errno);
+  fd = socket(domain, type, protocol);
+  if (fd == -1) {
+    fd = -errno;
     goto out;
   }
 
-  #if !defined(SOCK_NONBLOCK)
+ #if !defined(SOCK_NONBLOCK)
   SetNonBlock(fd);
 #endif
 #if !defined(SOCK_CLOEXEC)
@@ -204,22 +192,23 @@ out:
 NAN_METHOD(Bind) {
   NanScope();
   sockaddr_un sun;
+  int err;
   int fd;
-  int r;
 
   assert(args.Length() == 2);
 
   fd = args[0]->Int32Value();
   String::Utf8Value path(args[1]);
 
+  memset(&sun, 0, sizeof(sun));
   strncpy(sun.sun_path, *path, sizeof(sun.sun_path) - 1);
-  sun.sun_path[sizeof(sun.sun_path) - 1] = '\0';
   sun.sun_family = AF_UNIX;
 
-  if ((r = bind(fd, reinterpret_cast<sockaddr*>(&sun), sizeof sun)) == -1)
-    SetErrno(errno);
+  err = 0;
+  if (bind(fd, reinterpret_cast<sockaddr*>(&sun), sizeof(sun)))
+    err = -errno;
 
-  NanReturnValue(Integer::New(r));
+  NanReturnValue(Integer::New(err));
 }
 
 
@@ -231,6 +220,7 @@ NAN_METHOD(Send) {
   size_t length;
   msghdr msg;
   iovec iov;
+  int err;
   int fd;
   int r;
 
@@ -262,29 +252,49 @@ NAN_METHOD(Send) {
     r = sendmsg(fd, &msg, 0);
   while (r == -1 && errno == EINTR);
 
+  err = 0;
   if (r == -1)
-    SetErrno(errno);
+    err = -errno;
 
-  NanReturnValue(Integer::New(r));
+  NanReturnValue(Integer::New(err));
 }
 
 
 NAN_METHOD(Close) {
   NanScope();
+  int err;
   int fd;
-  int r;
 
   assert(args.Length() == 1);
-
   fd = args[0]->Int32Value();
-  r = close(fd);
 
-  if (r == -1)
-    SetErrno(errno);
+  // Suppress EINTR and EINPROGRESS.  EINTR means that the close() system call
+  // was interrupted by a signal.  According to POSIX, the file descriptor is
+  // in an undefined state afterwards.  It's not safe to try closing it again
+  // because it may have been closed, despite the signal.  If we call close()
+  // again, then it would either:
+  //
+  //   a) fail with EBADF, or
+  //
+  //   b) close the wrong file descriptor if another thread or a signal handler
+  //      has reused it in the mean time.
+  //
+  // Neither is what we want but scenario B is particularly bad.  Not retrying
+  // the close() could, in theory, lead to file descriptor leaks but, in
+  // practice, operating systems do the right thing and close the file
+  // descriptor, regardless of whether the operation was interrupted by
+  // a signal.
+  //
+  // EINPROGRESS is benign.  It means the close operation was interrupted but
+  // that the file descriptor has been closed or is being closed in the
+  // background.  It's informative, not an error.
+  err = 0;
+  if (close(fd))
+    if (errno != EINTR && errno != EINPROGRESS)
+      err = -errno;
 
   StopWatcher(fd);
-
-  NanReturnValue(Integer::New(r));
+  NanReturnValue(Integer::New(err));
 }
 
 
