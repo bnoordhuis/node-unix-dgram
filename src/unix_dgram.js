@@ -64,7 +64,7 @@ Socket.prototype.send = function(buf, offset, length, path, callback) {
   // FIXME defer error and callback to next tick?
   if (send(this.fd, buf, offset, length, path) == -1)
     this.emit('error', errnoException(errno, 'send'));
-  else
+  else if (typeof callback === 'function')
     callback();
 };
 
