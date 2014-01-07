@@ -191,7 +191,7 @@ out:
 
 NAN_METHOD(Bind) {
   NanScope();
-  sockaddr_un sun;
+  sockaddr_un s;
   int err;
   int fd;
 
@@ -200,12 +200,12 @@ NAN_METHOD(Bind) {
   fd = args[0]->Int32Value();
   String::Utf8Value path(args[1]);
 
-  memset(&sun, 0, sizeof(sun));
-  strncpy(sun.sun_path, *path, sizeof(sun.sun_path) - 1);
-  sun.sun_family = AF_UNIX;
+  memset(&s, 0, sizeof(s));
+  strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
+  s.sun_family = AF_UNIX;
 
   err = 0;
-  if (bind(fd, reinterpret_cast<sockaddr*>(&sun), sizeof(sun)))
+  if (bind(fd, reinterpret_cast<sockaddr*>(&s), sizeof(s)))
     err = -errno;
 
   NanReturnValue(Integer::New(err));
