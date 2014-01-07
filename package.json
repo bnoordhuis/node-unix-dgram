@@ -7,7 +7,7 @@
   "name": "unix-dgram",
   "version": "0.0.4",
   "description": "Unix datagram socket",
-  "main": "src/unix_dgram",
+  "main": "lib/unix_dgram",
   "homepage": "https://github.com/bnoordhuis/node-unix-dgram",
   "license": {
     "type": "ISC",

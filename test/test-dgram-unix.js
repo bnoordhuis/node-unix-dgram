@@ -1,7 +1,7 @@
 var assert = require('assert');
 var fs = require('fs');
 
-var unix = require('../src/unix_dgram');
+var unix = require('../lib/unix_dgram');
 var SOCKNAME = '/tmp/unix_dgram.sock';
 
 var sentPing = false;
