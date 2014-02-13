@@ -215,7 +215,7 @@ NAN_METHOD(Bind) {
 NAN_METHOD(Send) {
   NanScope();
   Local<Object> buf;
-  sockaddr_un sun;
+  sockaddr_un s;
   size_t offset;
   size_t length;
   msghdr msg;
@@ -238,15 +238,15 @@ NAN_METHOD(Send) {
   iov.iov_base = node::Buffer::Data(buf) + offset;
   iov.iov_len = length;
 
-  strncpy(sun.sun_path, *path, sizeof(sun.sun_path) - 1);
-  sun.sun_path[sizeof(sun.sun_path) - 1] = '\0';
-  sun.sun_family = AF_UNIX;
+  strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
+  s.sun_path[sizeof(s.sun_path) - 1] = '\0';
+  s.sun_family = AF_UNIX;
 
   memset(&msg, 0, sizeof msg);
   msg.msg_iovlen = 1;
   msg.msg_iov = &iov;
-  msg.msg_name = reinterpret_cast<void*>(&sun);
-  msg.msg_namelen = sizeof sun;
+  msg.msg_name = reinterpret_cast<void*>(&s);
+  msg.msg_namelen = sizeof(s);
 
   do
     r = sendmsg(fd, &msg, 0);
