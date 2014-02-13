@@ -134,16 +134,22 @@ void StartWatcher(int fd, Handle<Value> callback) {
 }
 
 
+void FreeSocketContext(uv_handle_t* handle) {
+  SocketContext* sc = container_of(handle, SocketContext, handle_);
+  delete sc;
+}
+
+
 void StopWatcher(int fd) {
   watchers_t::iterator iter = watchers.find(fd);
   assert(iter != watchers.end());
 
   SocketContext* sc = iter->second;
   NanDispose(sc->cb_);
+  watchers.erase(iter);
 
   uv_poll_stop(&sc->handle_);
-  watchers.erase(iter);
-  delete sc;
+  uv_close(reinterpret_cast<uv_handle_t*>(&sc->handle_), FreeSocketContext);
 }
 
 
