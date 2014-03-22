@@ -145,7 +145,7 @@ void StopWatcher(int fd) {
   assert(iter != watchers.end());
 
   SocketContext* sc = iter->second;
-  NanDispose(sc->cb_);
+  NanDisposePersistent(sc->cb_);
   watchers.erase(iter);
 
   uv_poll_stop(&sc->handle_);
