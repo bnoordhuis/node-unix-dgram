@@ -27,6 +27,6 @@
   "devDependencies": {},
   "optionalDependencies": {},
   "scripts": {
-    "test": "node test/*.js"
+    "test": "node test/test-dgram-unix.js && node test/test-connect.js"
   }
 }

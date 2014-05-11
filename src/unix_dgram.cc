@@ -25,6 +25,8 @@
 
 namespace {
 
+void OnEvent(uv_poll_t* handle, int status, int events);
+
 using node::FatalException;
 using v8::Context;
 using v8::Function;
@@ -40,7 +42,8 @@ using v8::TryCatch;
 using v8::Value;
 
 struct SocketContext {
-  Persistent<Function> cb_;
+  Persistent<Function> recv_cb_;
+  Persistent<Function> writable_cb_;
   uv_poll_t handle_;
   int fd_;
 };
@@ -73,22 +76,16 @@ void SetCloExec(int fd) {
   assert(r != -1);
 }
 
-
-void OnRecv(uv_poll_t* handle, int status, int events) {
+void OnRecv(SocketContext* sc) {
   NanScope();
   Handle<Value> argv[3];
   sockaddr_storage ss;
-  SocketContext* sc;
   msghdr msg;
   iovec iov;
   ssize_t err;
   char scratch[65536];
 
-  sc = container_of(handle, SocketContext, handle_);
   argv[0] = argv[1] = argv[2] = NanNull();
-
-  assert(0 == status);
-  assert(0 == (events & ~UV_READABLE));
 
   iov.iov_base = scratch;
   iov.iov_len = sizeof scratch;
@@ -118,23 +115,43 @@ void OnRecv(uv_poll_t* handle, int status, int events) {
   argv[0] = NanNew<Integer>(err);
 
   TryCatch tc;
-  NanNew(sc->cb_)->Call(NanGetCurrentContext()->Global(),
-                        sizeof(argv) / sizeof(argv[0]),
-                        argv);
+  NanNew(sc->recv_cb_)->Call(NanGetCurrentContext()->Global(),
+                             sizeof(argv) / sizeof(argv[0]),
+                             argv);
 
   if (tc.HasCaught())
     FatalException(tc);
 }
 
+void OnWritable(SocketContext* sc) {
+  NanScope();
+  TryCatch tc;
+  uv_poll_start(&sc->handle_, UV_READABLE, OnEvent);
+  NanNew(sc->writable_cb_)->Call(NanGetCurrentContext()->Global(), 0, 0);
+  if (tc.HasCaught())
+    FatalException(tc);
+}
 
-void StartWatcher(int fd, Handle<Value> callback) {
+void OnEvent(uv_poll_t* handle, int status, int events) {
+  assert(0 == status);
+  assert(0 == (events & ~(UV_READABLE | UV_WRITABLE)));
+  SocketContext* sc = container_of(handle, SocketContext, handle_);
+  if (events & UV_READABLE)
+    OnRecv(sc);
+
+  if (events & UV_WRITABLE)
+    OnWritable(sc);
+}
+
+void StartWatcher(int fd, Handle<Value> recv_cb, Handle<Value> writable_cb) {
   // start listening for incoming dgrams
   SocketContext* sc = new SocketContext;
-  NanAssignPersistent(sc->cb_, callback.As<Function>());
+  NanAssignPersistent(sc->recv_cb_, recv_cb.As<Function>());
+  NanAssignPersistent(sc->writable_cb_, writable_cb.As<Function>());
   sc->fd_ = fd;
 
   uv_poll_init(uv_default_loop(), &sc->handle_, fd);
-  uv_poll_start(&sc->handle_, UV_READABLE, OnRecv);
+  uv_poll_start(&sc->handle_, UV_READABLE, OnEvent);
 
   // so we can disarm the watcher when close(fd) is called
   watchers.insert(watchers_t::value_type(fd, sc));
@@ -152,7 +169,8 @@ void StopWatcher(int fd) {
   assert(iter != watchers.end());
 
   SocketContext* sc = iter->second;
-  NanDisposePersistent(sc->cb_);
+  NanDisposePersistent(sc->recv_cb_);
+  NanDisposePersistent(sc->writable_cb_);
   watchers.erase(iter);
 
   uv_poll_stop(&sc->handle_);
@@ -162,18 +180,20 @@ void StopWatcher(int fd) {
 
 NAN_METHOD(Socket) {
   NanScope();
-  Local<Value> cb;
+  Local<Value> recv_cb;
+  Local<Value> writable_cb;
   int protocol;
   int domain;
   int type;
   int fd;
 
-  assert(args.Length() == 4);
+  assert(args.Length() == 5);
 
-  domain    = args[0]->Int32Value();
-  type      = args[1]->Int32Value();
-  protocol  = args[2]->Int32Value();
-  cb        = args[3];
+  domain      = args[0]->Int32Value();
+  type        = args[1]->Int32Value();
+  protocol    = args[2]->Int32Value();
+  recv_cb     = args[3];
+  writable_cb = args[4];
 
 #if defined(SOCK_NONBLOCK)
   type |= SOCK_NONBLOCK;
@@ -195,7 +215,7 @@ NAN_METHOD(Socket) {
   SetCloExec(fd);
 #endif
 
-  StartWatcher(fd, cb);
+  StartWatcher(fd, recv_cb, writable_cb);
 
 out:
   NanReturnValue(NanNew<Integer>(fd));
@@ -224,8 +244,7 @@ NAN_METHOD(Bind) {
   NanReturnValue(NanNew<Integer>(err));
 }
 
-
-NAN_METHOD(Send) {
+NAN_METHOD(SendTo) {
   NanScope();
   Local<Object> buf;
   sockaddr_un s;
@@ -251,8 +270,8 @@ NAN_METHOD(Send) {
   iov.iov_base = node::Buffer::Data(buf) + offset;
   iov.iov_len = length;
 
+  memset(&s, 0, sizeof(s));
   strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
-  s.sun_path[sizeof(s.sun_path) - 1] = '\0';
   s.sun_family = AF_UNIX;
 
   memset(&msg, 0, sizeof msg);
@@ -267,6 +286,69 @@ NAN_METHOD(Send) {
 
   err = 0;
   if (r == -1)
+    err = -errno;
+
+  NanReturnValue(NanNew<Integer>(err));
+}
+
+NAN_METHOD(Send) {
+  NanScope();
+  Local<Object> buf;
+  msghdr msg;
+  iovec iov;
+  int err;
+  int fd;
+  int r;
+
+  assert(args.Length() == 2);
+
+  fd = args[0]->Int32Value();
+  buf = args[1]->ToObject();
+  assert(node::Buffer::HasInstance(buf));
+
+  iov.iov_base = node::Buffer::Data(buf);
+  iov.iov_len = node::Buffer::Length(buf);
+
+  memset(&msg, 0, sizeof msg);
+  msg.msg_iovlen = 1;
+  msg.msg_iov = &iov;
+
+  do
+    r = sendmsg(fd, &msg, 0);
+  while (r == -1 && errno == EINTR);
+
+  err = 0;
+  if (r == -1) {
+    err = -errno;
+    if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+      watchers_t::iterator iter = watchers.find(fd);
+      assert(iter != watchers.end());
+      SocketContext* sc = iter->second;
+      uv_poll_start(&sc->handle_, UV_READABLE | UV_WRITABLE, OnEvent);
+      err = 1;
+    }
+  }
+
+  NanReturnValue(NanNew<Integer>(err));
+}
+
+NAN_METHOD(Connect) {
+  NanScope();
+  sockaddr_un s;
+  int err;
+  int fd;
+
+  assert(args.Length() == 2);
+
+  fd = args[0]->Int32Value();
+  String::Utf8Value path(args[1]);
+
+  memset(&s, 0, sizeof(s));
+  strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
+  s.sun_family = AF_UNIX;
+
+  err = 0;
+  if (connect(fd, reinterpret_cast<sockaddr*>(&s), sizeof(s)))
     err = -errno;
 
   NanReturnValue(NanNew<Integer>(err));
@@ -322,8 +404,14 @@ void Initialize(Handle<Object> target) {
   target->Set(NanSymbol("bind"),
               NanNew<FunctionTemplate>(Bind)->GetFunction());
 
+  target->Set(NanSymbol("sendto"),
+              NanNew<FunctionTemplate>(SendTo)->GetFunction());
+
   target->Set(NanSymbol("send"),
               NanNew<FunctionTemplate>(Send)->GetFunction());
+
+  target->Set(NanSymbol("connect"),
+              NanNew<FunctionTemplate>(Connect)->GetFunction());
 
   target->Set(NanSymbol("close"),
               NanNew<FunctionTemplate>(Close)->GetFunction());

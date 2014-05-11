@@ -43,12 +43,57 @@ first argument.
 Create a server at `path`.  Emits a `'listening'` event on success or
 an `'error'` event if the `bind(2)` system call fails.
 
-### socket.send(buf, offset, length, path, [callback]);
+### socket.connect(remote_path)
+
+Associate a socket with a remote path so you can send a message without setting
+the remote path. Once the socket is **connected** it emits a `'connect'` event.
+It also allows to perform some kind of congestion control as it emits a
+`'congestion'` event when the receiving buffer is full, and a `'writable'` event
+when it stops being full.
+
+### socket.send(buf, [callback])
+
+Only to be used with **connected** sockets. It sends a message to the remote
+path associated with the socket
+
+Example:
+
+    var unix = require('unix-dgram');
+
+    var client = unix.createSocket('unix_dgram');
+
+    client.on('error', function(err) {
+        console.error(err);
+    });
+
+    client.on('connect', function() {
+        console.log('connected');
+        client.on('congestion', function() {
+            console.log('congestion');
+            /* The server is not accepting data */
+        });
+
+        client.on('writable', function() {
+            console.log('writable');
+            /* The server can accept data */
+        });
+
+        var message = new Buffer('PING');
+        client.send(message);
+    });
+
+    client.connect('/tmp/server');
+
+
+### socket.send_to(buf, offset, length, path, [callback]);
 
 Send a message to the server listening at `path`.
 
 `buf` is a `Buffer` object containing the message to send, `offset` is
 the offset into the buffer and `length` is the length of the message.
+
+For backwards compatibility, you can still use the `socket.send` function with
+this same signature.
 
 Example:
 
