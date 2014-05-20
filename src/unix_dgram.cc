@@ -85,7 +85,7 @@ void OnRecv(uv_poll_t* handle, int status, int events) {
   char scratch[65536];
 
   sc = container_of(handle, SocketContext, handle_);
-  argv[0] = argv[1] = argv[2] = Null();
+  argv[0] = argv[1] = argv[2] = NanNull();
 
   assert(0 == status);
   assert(0 == (events & ~UV_READABLE));
@@ -108,12 +108,12 @@ void OnRecv(uv_poll_t* handle, int status, int events) {
   else
     argv[1] = NanNewBufferHandle(scratch, err);
 
-  argv[0] = Integer::New(err);
+  argv[0] = NanNew<Integer>(err);
 
   TryCatch tc;
-  NanPersistentToLocal(sc->cb_)->Call(Context::GetCurrent()->Global(),
-                                      sizeof(argv) / sizeof(argv[0]),
-                                      argv);
+  NanNew(sc->cb_)->Call(NanGetCurrentContext()->Global(),
+                        sizeof(argv) / sizeof(argv[0]),
+                        argv);
 
   if (tc.HasCaught())
     FatalException(tc);
@@ -123,7 +123,7 @@ void OnRecv(uv_poll_t* handle, int status, int events) {
 void StartWatcher(int fd, Handle<Value> callback) {
   // start listening for incoming dgrams
   SocketContext* sc = new SocketContext;
-  NanAssignPersistent(Function, sc->cb_, callback.As<Function>());
+  NanAssignPersistent(sc->cb_, callback.As<Function>());
   sc->fd_ = fd;
 
   uv_poll_init(uv_default_loop(), &sc->handle_, fd);
@@ -191,7 +191,7 @@ NAN_METHOD(Socket) {
   StartWatcher(fd, cb);
 
 out:
-  NanReturnValue(Integer::New(fd));
+  NanReturnValue(NanNew<Integer>(fd));
 }
 
 
@@ -214,7 +214,7 @@ NAN_METHOD(Bind) {
   if (bind(fd, reinterpret_cast<sockaddr*>(&s), sizeof(s)))
     err = -errno;
 
-  NanReturnValue(Integer::New(err));
+  NanReturnValue(NanNew<Integer>(err));
 }
 
 
@@ -262,7 +262,7 @@ NAN_METHOD(Send) {
   if (r == -1)
     err = -errno;
 
-  NanReturnValue(Integer::New(err));
+  NanReturnValue(NanNew<Integer>(err));
 }
 
 
@@ -300,26 +300,26 @@ NAN_METHOD(Close) {
       err = -errno;
 
   StopWatcher(fd);
-  NanReturnValue(Integer::New(err));
+  NanReturnValue(NanNew<Integer>(err));
 }
 
 
 void Initialize(Handle<Object> target) {
   // don't need to be read-only, only used by the JS shim
-  target->Set(NanSymbol("AF_UNIX"), Integer::New(AF_UNIX));
-  target->Set(NanSymbol("SOCK_DGRAM"), Integer::New(SOCK_DGRAM));
-
+  target->Set(NanSymbol("AF_UNIX"), NanNew<Integer>(AF_UNIX));
+  target->Set(NanSymbol("SOCK_DGRAM"), NanNew<Integer>(SOCK_DGRAM));
+  
   target->Set(NanSymbol("socket"),
-              FunctionTemplate::New(Socket)->GetFunction());
+              NanNew<FunctionTemplate>(Socket)->GetFunction());
 
   target->Set(NanSymbol("bind"),
-              FunctionTemplate::New(Bind)->GetFunction());
+              NanNew<FunctionTemplate>(Bind)->GetFunction());
 
   target->Set(NanSymbol("send"),
-              FunctionTemplate::New(Send)->GetFunction());
+              NanNew<FunctionTemplate>(Send)->GetFunction());
 
   target->Set(NanSymbol("close"),
-              FunctionTemplate::New(Close)->GetFunction());
+              NanNew<FunctionTemplate>(Close)->GetFunction());
 }
 
 
