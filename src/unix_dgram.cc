@@ -112,7 +112,7 @@ void OnRecv(SocketContext* sc) {
     }
   }
 
-  argv[0] = NanNew<Integer>(err);
+  argv[0] = NanNew(err);
 
   TryCatch tc;
   NanNew(sc->recv_cb_)->Call(NanGetCurrentContext()->Global(),
@@ -218,7 +218,7 @@ NAN_METHOD(Socket) {
   StartWatcher(fd, recv_cb, writable_cb);
 
 out:
-  NanReturnValue(NanNew<Integer>(fd));
+  NanReturnValue(NanNew(fd));
 }
 
 
@@ -241,7 +241,7 @@ NAN_METHOD(Bind) {
   if (bind(fd, reinterpret_cast<sockaddr*>(&s), sizeof(s)))
     err = -errno;
 
-  NanReturnValue(NanNew<Integer>(err));
+  NanReturnValue(NanNew(err));
 }
 
 NAN_METHOD(SendTo) {
@@ -288,7 +288,7 @@ NAN_METHOD(SendTo) {
   if (r == -1)
     err = -errno;
 
-  NanReturnValue(NanNew<Integer>(err));
+  NanReturnValue(NanNew(err));
 }
 
 NAN_METHOD(Send) {
@@ -329,7 +329,7 @@ NAN_METHOD(Send) {
     }
   }
 
-  NanReturnValue(NanNew<Integer>(err));
+  NanReturnValue(NanNew(err));
 }
 
 NAN_METHOD(Connect) {
@@ -351,7 +351,7 @@ NAN_METHOD(Connect) {
   if (connect(fd, reinterpret_cast<sockaddr*>(&s), sizeof(s)))
     err = -errno;
 
-  NanReturnValue(NanNew<Integer>(err));
+  NanReturnValue(NanNew(err));
 }
 
 
@@ -389,31 +389,31 @@ NAN_METHOD(Close) {
       err = -errno;
 
   StopWatcher(fd);
-  NanReturnValue(NanNew<Integer>(err));
+  NanReturnValue(NanNew(err));
 }
 
 
 void Initialize(Handle<Object> target) {
   // don't need to be read-only, only used by the JS shim
-  target->Set(NanSymbol("AF_UNIX"), NanNew<Integer>(AF_UNIX));
-  target->Set(NanSymbol("SOCK_DGRAM"), NanNew<Integer>(SOCK_DGRAM));
-  
-  target->Set(NanSymbol("socket"),
+  target->Set(NanNew("AF_UNIX"), NanNew(AF_UNIX));
+  target->Set(NanNew("SOCK_DGRAM"), NanNew(SOCK_DGRAM));
+
+  target->Set(NanNew("socket"),
               NanNew<FunctionTemplate>(Socket)->GetFunction());
 
-  target->Set(NanSymbol("bind"),
+  target->Set(NanNew("bind"),
               NanNew<FunctionTemplate>(Bind)->GetFunction());
 
-  target->Set(NanSymbol("sendto"),
+  target->Set(NanNew("sendto"),
               NanNew<FunctionTemplate>(SendTo)->GetFunction());
 
-  target->Set(NanSymbol("send"),
+  target->Set(NanNew("send"),
               NanNew<FunctionTemplate>(Send)->GetFunction());
 
-  target->Set(NanSymbol("connect"),
+  target->Set(NanNew("connect"),
               NanNew<FunctionTemplate>(Connect)->GetFunction());
 
-  target->Set(NanSymbol("close"),
+  target->Set(NanNew("close"),
               NanNew<FunctionTemplate>(Close)->GetFunction());
 }
 
