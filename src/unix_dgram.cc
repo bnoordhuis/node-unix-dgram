@@ -93,6 +93,9 @@ void OnRecv(uv_poll_t* handle, int status, int events) {
   iov.iov_base = scratch;
   iov.iov_len = sizeof scratch;
 
+  sockaddr_un* sun = reinterpret_cast<sockaddr_un*>(&ss);
+  sun->sun_path[0] = '\0';
+
   memset(&msg, 0, sizeof msg);
   msg.msg_iovlen = 1;
   msg.msg_iov = &iov;
@@ -103,10 +106,14 @@ void OnRecv(uv_poll_t* handle, int status, int events) {
     err = recvmsg(sc->fd_, &msg, 0);
   while (err == -1 && errno == EINTR);
 
-  if (err == -1)
+  if (err == -1) {
     err = -errno;
-  else
+  } else {
     argv[1] = NanNewBufferHandle(scratch, err);
+    if (sun->sun_path[0] != '\0') {
+      argv[2] = NanNew<String>(sun->sun_path);
+    }
+  }
 
   argv[0] = NanNew<Integer>(err);
 

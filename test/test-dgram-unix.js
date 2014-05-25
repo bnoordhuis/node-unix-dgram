@@ -3,23 +3,47 @@ var fs = require('fs');
 
 var unix = require('../lib/unix_dgram');
 var SOCKNAME = '/tmp/unix_dgram.sock';
+var SOCKNAME_CLIENT = '/tmp/unix_dgram_client.sock';
 
-var sentPing = false;
-var seenPing = false;
+var sentPing1 = false;
+var sentPing2 = false;
+var seenPing1 = false;
+var seenPing2 = false;
 
 process.on('exit', function() {
-  assert.equal(sentPing, true);
-  assert.equal(seenPing, true);
+  assert.equal(sentPing1, true);
+  assert.equal(sentPing2, true);
+  assert.equal(seenPing1, true);
+  assert.equal(seenPing2, true);
 });
 
 try { fs.unlinkSync(SOCKNAME); } catch (e) { /* swallow */ }
+try { fs.unlinkSync(SOCKNAME_CLIENT); } catch (e) { /* swallow */ }
+
+var n = 0;
 
 var server = unix.createSocket('unix_dgram', function(buf, rinfo) {
   console.error('server recv', '' + buf, arguments);
-  assert.equal('' + buf, 'PING');
-  seenPing = true;
-  server.close();
-  client.close();
+  switch (++n) {
+    case 1:
+      assert.equal('' + buf, 'PING1');
+      assert.equal(rinfo.path, null);
+      seenPing1 = true;
+      client.bind(SOCKNAME_CLIENT);
+      client.send(Buffer('PING2'), 0, 5, SOCKNAME, function() {
+        console.error('client send', arguments);
+        sentPing2 = true;
+      });
+    break;
+    case 2:
+      assert.equal('' + buf, 'PING2');
+      assert.equal(rinfo.path, SOCKNAME_CLIENT);
+      seenPing2 = true;
+      server.close();
+      client.close();
+    break;
+
+  }
 });
 server.bind(SOCKNAME);
 
@@ -28,7 +52,7 @@ var client = unix.createSocket('unix_dgram', function(buf, rinfo) {
   assert(0);
 });
 
-client.send(Buffer('PING'), 0, 4, SOCKNAME, function() {
+client.send(Buffer('PING1'), 0, 5, SOCKNAME, function() {
   console.error('client send', arguments);
-  sentPing = true;
+  sentPing1 = true;
 });
