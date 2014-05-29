@@ -79,25 +79,29 @@ void SetCloExec(int fd) {
 void OnRecv(SocketContext* sc) {
   NanScope();
   Handle<Value> argv[3];
-  sockaddr_storage ss;
   msghdr msg;
   iovec iov;
   ssize_t err;
   char scratch[65536];
+
+  /* Union to avoid breaking strict-aliasing rules */
+  union {
+    struct sockaddr_un sun;
+    struct sockaddr_storage ss;
+  } u_addr;
 
   argv[0] = argv[1] = argv[2] = NanNull();
 
   iov.iov_base = scratch;
   iov.iov_len = sizeof scratch;
 
-  sockaddr_un* sun = reinterpret_cast<sockaddr_un*>(&ss);
-  sun->sun_path[0] = '\0';
+  u_addr.sun.sun_path[0] = '\0';
 
   memset(&msg, 0, sizeof msg);
   msg.msg_iovlen = 1;
   msg.msg_iov = &iov;
-  msg.msg_name = &ss;
-  msg.msg_namelen = sizeof ss;
+  msg.msg_name = &u_addr.ss;
+  msg.msg_namelen = sizeof u_addr.ss;
 
   do
     err = recvmsg(sc->fd_, &msg, 0);
@@ -107,8 +111,8 @@ void OnRecv(SocketContext* sc) {
     err = -errno;
   } else {
     argv[1] = NanNewBufferHandle(scratch, err);
-    if (sun->sun_path[0] != '\0') {
-      argv[2] = NanNew<String>(sun->sun_path);
+    if (u_addr.sun.sun_path[0] != '\0') {
+      argv[2] = NanNew<String>(u_addr.sun.sun_path);
     }
   }
 
