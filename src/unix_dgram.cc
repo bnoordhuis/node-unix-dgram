@@ -228,21 +228,22 @@ out:
 
 NAN_METHOD(Bind) {
   NanScope();
-  sockaddr_un s;
+  sockaddr* s;
   int err;
   int fd;
+  Local<Object> buf;
 
   assert(args.Length() == 2);
 
   fd = args[0]->Int32Value();
-  String::Utf8Value path(args[1]);
+  buf = args[1]->ToObject();
 
-  memset(&s, 0, sizeof(s));
-  strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
-  s.sun_family = AF_UNIX;
+  assert(node::Buffer::HasInstance(buf));
+
+  s = reinterpret_cast<sockaddr*>(node::Buffer::Data(buf));
 
   err = 0;
-  if (bind(fd, reinterpret_cast<sockaddr*>(&s), sizeof(s)))
+  if (bind(fd, s, node::Buffer::Length(buf)))
     err = -errno;
 
   NanReturnValue(NanNew(err));
@@ -251,7 +252,8 @@ NAN_METHOD(Bind) {
 NAN_METHOD(SendTo) {
   NanScope();
   Local<Object> buf;
-  sockaddr_un s;
+  Local<Object> buf_path;
+  sockaddr* s;
   size_t offset;
   size_t length;
   msghdr msg;
@@ -266,23 +268,22 @@ NAN_METHOD(SendTo) {
   buf = args[1]->ToObject();
   offset = args[2]->Uint32Value();
   length = args[3]->Uint32Value();
-  String::Utf8Value path(args[4]);
+  buf_path = args[4]->ToObject();
 
   assert(node::Buffer::HasInstance(buf));
   assert(offset + length <= node::Buffer::Length(buf));
+  assert(node::Buffer::HasInstance(buf_path));
 
   iov.iov_base = node::Buffer::Data(buf) + offset;
   iov.iov_len = length;
 
-  memset(&s, 0, sizeof(s));
-  strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
-  s.sun_family = AF_UNIX;
+  s = reinterpret_cast<sockaddr*>(node::Buffer::Data(buf_path));
 
   memset(&msg, 0, sizeof msg);
   msg.msg_iovlen = 1;
   msg.msg_iov = &iov;
-  msg.msg_name = reinterpret_cast<void*>(&s);
-  msg.msg_namelen = sizeof(s);
+  msg.msg_name = reinterpret_cast<void*>(s);
+  msg.msg_namelen = node::Buffer::Length(buf_path);
 
   do
     r = sendmsg(fd, &msg, 0);
@@ -338,21 +339,22 @@ NAN_METHOD(Send) {
 
 NAN_METHOD(Connect) {
   NanScope();
-  sockaddr_un s;
+  sockaddr* s;
   int err;
   int fd;
+  Local<Object> buf;
 
   assert(args.Length() == 2);
 
   fd = args[0]->Int32Value();
-  String::Utf8Value path(args[1]);
+  buf = args[1]->ToObject();
 
-  memset(&s, 0, sizeof(s));
-  strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
-  s.sun_family = AF_UNIX;
+  assert(node::Buffer::HasInstance(buf));
+
+  s = reinterpret_cast<sockaddr*>(node::Buffer::Data(buf));
 
   err = 0;
-  if (connect(fd, reinterpret_cast<sockaddr*>(&s), sizeof(s)))
+  if (connect(fd, s, node::Buffer::Length(buf)))
     err = -errno;
 
   NanReturnValue(NanNew(err));
@@ -396,6 +398,20 @@ NAN_METHOD(Close) {
   NanReturnValue(NanNew(err));
 }
 
+NAN_METHOD(UnixAddr) {
+  NanScope();
+  sockaddr_un s;
+
+  assert(args.Length() == 1);
+
+  String::Utf8Value path(args[0]);
+
+  memset(&s, 0, sizeof(s));
+  strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
+  s.sun_family = AF_UNIX;
+
+  NanReturnValue(NanNewBufferHandle((const char*)&s, sizeof(s)));
+}
 
 void Initialize(Handle<Object> target) {
   // don't need to be read-only, only used by the JS shim
@@ -419,6 +435,9 @@ void Initialize(Handle<Object> target) {
 
   target->Set(NanNew("close"),
               NanNew<FunctionTemplate>(Close)->GetFunction());
+
+  target->Set(NanNew("_unix_addr"),
+              NanNew<FunctionTemplate>(UnixAddr)->GetFunction());
 }
 
 
