@@ -80,29 +80,24 @@ void SetCloExec(int fd) {
 void OnRecv(SocketContext* sc) {
   NanScope();
   Handle<Value> argv[3];
+  sockaddr_storage ss;
   msghdr msg;
   iovec iov;
   ssize_t err;
   char scratch[65536];
 
-  /* Union to avoid breaking strict-aliasing rules */
-  union {
-    struct sockaddr_un sun;
-    struct sockaddr_storage ss;
-  } u_addr;
-
   argv[0] = argv[1] = argv[2] = NanNull();
+
+  memset(&ss, 0, sizeof ss);
 
   iov.iov_base = scratch;
   iov.iov_len = sizeof scratch;
 
-  u_addr.sun.sun_path[0] = '\0';
-
   memset(&msg, 0, sizeof msg);
   msg.msg_iovlen = 1;
   msg.msg_iov = &iov;
-  msg.msg_name = &u_addr.ss;
-  msg.msg_namelen = sizeof u_addr.ss;
+  msg.msg_name = &ss;
+  msg.msg_namelen = sizeof ss;
 
   do
     err = recvmsg(sc->fd_, &msg, 0);
@@ -112,9 +107,9 @@ void OnRecv(SocketContext* sc) {
     err = -errno;
   } else {
     argv[1] = NanNewBufferHandle(scratch, err);
-    if (u_addr.sun.sun_path[0] != '\0') {
-      argv[2] = NanNew<String>(u_addr.sun.sun_path);
-    }
+    const char* addr_buf = reinterpret_cast<const char*>(
+                             const_cast<const sockaddr_storage*>(&ss));
+    argv[2] = NanNewBufferHandle(addr_buf, sizeof ss);
   }
 
   argv[0] = NanNew<Integer>(err);
@@ -419,6 +414,22 @@ NAN_METHOD(ToUnixAddr) {
   NanReturnValue(NanNewBufferHandle(addr_buf, sizeof(s)));
 }
 
+NAN_METHOD(FromUnixAddress) {
+  NanScope();
+  const sockaddr_un* s;
+  Local<Object> buf;
+
+  assert(args.Length() == 1);
+
+  buf = args[0]->ToObject();
+
+  assert(node::Buffer::HasInstance(buf));
+
+  s = reinterpret_cast<const sockaddr_un*>(node::Buffer::Data(buf));
+  NanReturnValue(NanNew<String>(s->sun_path));
+}
+
+
 void Initialize(Handle<Object> target) {
   // don't need to be read-only, only used by the JS shim
   target->Set(NanNew("AF_UNIX"), NanNew(AF_UNIX));
@@ -444,6 +455,9 @@ void Initialize(Handle<Object> target) {
 
   target->Set(NanNew("toUnixAddress"),
               NanNew<FunctionTemplate>(ToUnixAddr)->GetFunction());
+
+  target->Set(NanNew("fromUnixAddress"),
+              NanNew<FunctionTemplate>(FromUnixAddress)->GetFunction());
 }
 
 
