@@ -408,11 +408,14 @@ NAN_METHOD(ToUnixAddr) {
   String::Utf8Value path(args[0]);
 
   memset(&s, 0, sizeof(s));
-  const size_t size = std::min(static_cast<const size_t>(path.length()), sizeof(s.sun_path) - 1);
+  const size_t size = std::min(
+                        static_cast<const size_t>(path.length()),
+                        sizeof(s.sun_path) - 1);
   memcpy(s.sun_path, *path, size);
   s.sun_family = AF_UNIX;
 
-  const char* addr_buf = reinterpret_cast<const char*>(const_cast<const sockaddr_un*>(&s));
+  const char* addr_buf = reinterpret_cast<const char*>(
+                           const_cast<const sockaddr_un*>(&s));
   NanReturnValue(NanNewBufferHandle(addr_buf, sizeof(s)));
 }
 
