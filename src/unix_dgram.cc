@@ -116,7 +116,7 @@ void OnRecv(SocketContext* sc) {
     }
   }
 
-  argv[0] = NanNew<Integer>(err);
+  argv[0] = NanNew<Integer>(static_cast<int32_t>(err));
 
   TryCatch tc;
   NanNew(sc->recv_cb_)->Call(NanGetCurrentContext()->Global(),
