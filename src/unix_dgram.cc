@@ -27,7 +27,6 @@ namespace {
 
 void OnEvent(uv_poll_t* handle, int status, int events);
 
-using node::FatalException;
 using v8::Context;
 using v8::Function;
 using v8::FunctionTemplate;
@@ -38,7 +37,6 @@ using v8::Null;
 using v8::Object;
 using v8::Persistent;
 using v8::String;
-using v8::TryCatch;
 using v8::Value;
 
 struct SocketContext {
@@ -118,22 +116,17 @@ void OnRecv(SocketContext* sc) {
 
   argv[0] = NanNew<Integer>(static_cast<int32_t>(err));
 
-  TryCatch tc;
-  NanNew(sc->recv_cb_)->Call(NanGetCurrentContext()->Global(),
-                             sizeof(argv) / sizeof(argv[0]),
-                             argv);
-
-  if (tc.HasCaught())
-    FatalException(tc);
+  NanMakeCallback(NanGetCurrentContext()->Global(),
+                  NanNew(sc->recv_cb_),
+                  sizeof(argv) / sizeof(argv[0]),
+                  argv);
 }
 
 void OnWritable(SocketContext* sc) {
   NanScope();
-  TryCatch tc;
-  uv_poll_start(&sc->handle_, UV_READABLE, OnEvent);
-  NanNew(sc->writable_cb_)->Call(NanGetCurrentContext()->Global(), 0, 0);
-  if (tc.HasCaught())
-    FatalException(tc);
+  NanMakeCallback(NanGetCurrentContext()->Global(),
+                  NanNew(sc->writable_cb_),
+                  0, NULL);
 }
 
 void OnEvent(uv_poll_t* handle, int status, int events) {
