@@ -124,6 +124,7 @@ void OnRecv(SocketContext* sc) {
 
 void OnWritable(SocketContext* sc) {
   NanScope();
+  uv_poll_start(&sc->handle_, UV_READABLE, OnEvent);
   NanMakeCallback(NanGetCurrentContext()->Global(),
                   NanNew(sc->writable_cb_),
                   0, NULL);
