@@ -51,7 +51,7 @@ typedef std::map<int, SocketContext*> watchers_t;
 watchers_t watchers;
 
 
-void SetNonBlock(int fd) {
+inline void SetNonBlock(int fd) {
   int flags;
   int r;
 
@@ -63,7 +63,7 @@ void SetNonBlock(int fd) {
 }
 
 
-void SetCloExec(int fd) {
+inline void SetCloExec(int fd) {
   int flags;
   int r;
 
