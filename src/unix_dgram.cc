@@ -16,6 +16,7 @@
 #include <sys/un.h>
 
 #include <map>
+#include <algorithm>
 
 #define offset_of(type, member)                                               \
   ((intptr_t) ((char *) &(((type *) 8)->member) - 8))
@@ -77,29 +78,24 @@ inline void SetCloExec(int fd) {
 void OnRecv(SocketContext* sc) {
   NanScope();
   Handle<Value> argv[3];
+  sockaddr_storage ss;
   msghdr msg;
   iovec iov;
   ssize_t err;
   char scratch[65536];
 
-  /* Union to avoid breaking strict-aliasing rules */
-  union {
-    struct sockaddr_un sun;
-    struct sockaddr_storage ss;
-  } u_addr;
-
   argv[0] = argv[1] = argv[2] = NanNull();
+
+  memset(&ss, 0, sizeof ss);
 
   iov.iov_base = scratch;
   iov.iov_len = sizeof scratch;
 
-  u_addr.sun.sun_path[0] = '\0';
-
   memset(&msg, 0, sizeof msg);
   msg.msg_iovlen = 1;
   msg.msg_iov = &iov;
-  msg.msg_name = &u_addr.ss;
-  msg.msg_namelen = sizeof u_addr.ss;
+  msg.msg_name = &ss;
+  msg.msg_namelen = sizeof ss;
 
   do
     err = recvmsg(sc->fd_, &msg, 0);
@@ -109,9 +105,9 @@ void OnRecv(SocketContext* sc) {
     err = -errno;
   } else {
     argv[1] = NanNewBufferHandle(scratch, err);
-    if (u_addr.sun.sun_path[0] != '\0') {
-      argv[2] = NanNew<String>(u_addr.sun.sun_path);
-    }
+    const char* addr_buf = reinterpret_cast<const char*>(
+                             const_cast<const sockaddr_storage*>(&ss));
+    argv[2] = NanNewBufferHandle(addr_buf, sizeof ss);
   }
 
   argv[0] = NanNew<Integer>(static_cast<int32_t>(err));
@@ -222,21 +218,22 @@ out:
 
 NAN_METHOD(Bind) {
   NanScope();
-  sockaddr_un s;
+  const sockaddr* s;
   int err;
   int fd;
+  Local<Object> buf;
 
   assert(args.Length() == 2);
 
   fd = args[0]->Int32Value();
-  String::Utf8Value path(args[1]);
+  buf = args[1]->ToObject();
 
-  memset(&s, 0, sizeof(s));
-  strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
-  s.sun_family = AF_UNIX;
+  assert(node::Buffer::HasInstance(buf));
+
+  s = reinterpret_cast<const sockaddr*>(node::Buffer::Data(buf));
 
   err = 0;
-  if (bind(fd, reinterpret_cast<sockaddr*>(&s), sizeof(s)))
+  if (bind(fd, s, node::Buffer::Length(buf)))
     err = -errno;
 
   NanReturnValue(NanNew(err));
@@ -245,7 +242,8 @@ NAN_METHOD(Bind) {
 NAN_METHOD(SendTo) {
   NanScope();
   Local<Object> buf;
-  sockaddr_un s;
+  Local<Object> buf_sockaddr_un;
+  sockaddr* s;
   size_t offset;
   size_t length;
   msghdr msg;
@@ -260,23 +258,22 @@ NAN_METHOD(SendTo) {
   buf = args[1]->ToObject();
   offset = args[2]->Uint32Value();
   length = args[3]->Uint32Value();
-  String::Utf8Value path(args[4]);
+  buf_sockaddr_un = args[4]->ToObject();
 
   assert(node::Buffer::HasInstance(buf));
   assert(offset + length <= node::Buffer::Length(buf));
+  assert(node::Buffer::HasInstance(buf_sockaddr_un));
 
   iov.iov_base = node::Buffer::Data(buf) + offset;
   iov.iov_len = length;
 
-  memset(&s, 0, sizeof(s));
-  strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
-  s.sun_family = AF_UNIX;
+  s = reinterpret_cast<sockaddr*>(node::Buffer::Data(buf_sockaddr_un));
 
   memset(&msg, 0, sizeof msg);
   msg.msg_iovlen = 1;
   msg.msg_iov = &iov;
-  msg.msg_name = reinterpret_cast<void*>(&s);
-  msg.msg_namelen = sizeof(s);
+  msg.msg_name = reinterpret_cast<void*>(s);
+  msg.msg_namelen = node::Buffer::Length(buf_sockaddr_un);
 
   do
     r = sendmsg(fd, &msg, 0);
@@ -332,21 +329,22 @@ NAN_METHOD(Send) {
 
 NAN_METHOD(Connect) {
   NanScope();
-  sockaddr_un s;
+  const sockaddr* s;
   int err;
   int fd;
+  Local<Object> buf;
 
   assert(args.Length() == 2);
 
   fd = args[0]->Int32Value();
-  String::Utf8Value path(args[1]);
+  buf = args[1]->ToObject();
 
-  memset(&s, 0, sizeof(s));
-  strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
-  s.sun_family = AF_UNIX;
+  assert(node::Buffer::HasInstance(buf));
+
+  s = reinterpret_cast<const sockaddr*>(node::Buffer::Data(buf));
 
   err = 0;
-  if (connect(fd, reinterpret_cast<sockaddr*>(&s), sizeof(s)))
+  if (connect(fd, s, node::Buffer::Length(buf)))
     err = -errno;
 
   NanReturnValue(NanNew(err));
@@ -390,6 +388,41 @@ NAN_METHOD(Close) {
   NanReturnValue(NanNew(err));
 }
 
+NAN_METHOD(ToUnixAddr) {
+  NanScope();
+  sockaddr_un s;
+
+  assert(args.Length() == 1);
+
+  String::Utf8Value path(args[0]);
+
+  memset(&s, 0, sizeof(s));
+  const size_t size = std::min(
+                        static_cast<const size_t>(path.length()),
+                        sizeof(s.sun_path) - 1);
+  memcpy(s.sun_path, *path, size);
+  s.sun_family = AF_UNIX;
+
+  const char* addr_buf = reinterpret_cast<const char*>(
+                           const_cast<const sockaddr_un*>(&s));
+  NanReturnValue(NanNewBufferHandle(addr_buf, sizeof(s)));
+}
+
+NAN_METHOD(FromUnixAddress) {
+  NanScope();
+  const sockaddr_un* s;
+  Local<Object> buf;
+
+  assert(args.Length() == 1);
+
+  buf = args[0]->ToObject();
+
+  assert(node::Buffer::HasInstance(buf));
+
+  s = reinterpret_cast<const sockaddr_un*>(node::Buffer::Data(buf));
+  NanReturnValue(NanNew<String>(s->sun_path));
+}
+
 
 void Initialize(Handle<Object> target) {
   // don't need to be read-only, only used by the JS shim
@@ -413,6 +446,12 @@ void Initialize(Handle<Object> target) {
 
   target->Set(NanNew("close"),
               NanNew<FunctionTemplate>(Close)->GetFunction());
+
+  target->Set(NanNew("toUnixAddress"),
+              NanNew<FunctionTemplate>(ToUnixAddr)->GetFunction());
+
+  target->Set(NanNew("fromUnixAddress"),
+              NanNew<FunctionTemplate>(FromUnixAddress)->GetFunction());
 }
 
 
