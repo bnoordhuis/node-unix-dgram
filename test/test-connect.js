@@ -8,7 +8,7 @@ var sentCount = 0;
 var seenCount = 0;
 
 process.on('exit', function() {
-  assert(seenCount === sentCount);
+  assert.equal(seenCount, sentCount);
 });
 
 try { fs.unlinkSync(SOCKNAME); } catch (e) { /* swallow */ }
