@@ -30,7 +30,6 @@ void OnEvent(uv_poll_t* handle, int status, int events);
 using v8::Context;
 using v8::Function;
 using v8::FunctionTemplate;
-using v8::Handle;
 using v8::Integer;
 using v8::Local;
 using v8::Null;
@@ -40,8 +39,8 @@ using v8::String;
 using v8::Value;
 
 struct SocketContext {
-  Persistent<Function> recv_cb_;
-  Persistent<Function> writable_cb_;
+  Nan::Persistent<Function> recv_cb_;
+  Nan::Persistent<Function> writable_cb_;
   uv_poll_t handle_;
   int fd_;
 };
@@ -75,8 +74,8 @@ inline void SetCloExec(int fd) {
 }
 
 void OnRecv(SocketContext* sc) {
-  NanScope();
-  Handle<Value> argv[3];
+  Nan::HandleScope scope;
+  Local<Value> argv[3];
   msghdr msg;
   iovec iov;
   ssize_t err;
@@ -88,7 +87,7 @@ void OnRecv(SocketContext* sc) {
     struct sockaddr_storage ss;
   } u_addr;
 
-  argv[0] = argv[1] = argv[2] = NanNull();
+  argv[0] = argv[1] = argv[2] = Nan::Null();
 
   iov.iov_base = scratch;
   iov.iov_len = sizeof scratch;
@@ -108,26 +107,26 @@ void OnRecv(SocketContext* sc) {
   if (err == -1) {
     err = -errno;
   } else {
-    argv[1] = NanNewBufferHandle(scratch, err);
+    argv[1] = Nan::CopyBuffer(scratch, err).ToLocalChecked();
     if (u_addr.sun.sun_path[0] != '\0') {
-      argv[2] = NanNew<String>(u_addr.sun.sun_path);
+      argv[2] = Nan::New<String>(u_addr.sun.sun_path).ToLocalChecked();
     }
   }
 
-  argv[0] = NanNew<Integer>(static_cast<int32_t>(err));
+  argv[0] = Nan::New<Integer>(static_cast<int32_t>(err));
 
-  NanMakeCallback(NanGetCurrentContext()->Global(),
-                  NanNew(sc->recv_cb_),
-                  sizeof(argv) / sizeof(argv[0]),
-                  argv);
+  Nan::MakeCallback(Nan::GetCurrentContext()->Global(),
+                    Nan::New(sc->recv_cb_),
+                    sizeof(argv) / sizeof(argv[0]),
+                    argv);
 }
 
 void OnWritable(SocketContext* sc) {
-  NanScope();
+  Nan::HandleScope scope;
   uv_poll_start(&sc->handle_, UV_READABLE, OnEvent);
-  NanMakeCallback(NanGetCurrentContext()->Global(),
-                  NanNew(sc->writable_cb_),
-                  0, NULL);
+  Nan::MakeCallback(Nan::GetCurrentContext()->Global(),
+                    Nan::New(sc->writable_cb_),
+                    0, NULL);
 }
 
 void OnEvent(uv_poll_t* handle, int status, int events) {
@@ -141,11 +140,11 @@ void OnEvent(uv_poll_t* handle, int status, int events) {
     OnWritable(sc);
 }
 
-void StartWatcher(int fd, Handle<Value> recv_cb, Handle<Value> writable_cb) {
+void StartWatcher(int fd, Local<Value> recv_cb, Local<Value> writable_cb) {
   // start listening for incoming dgrams
   SocketContext* sc = new SocketContext;
-  NanAssignPersistent(sc->recv_cb_, recv_cb.As<Function>());
-  NanAssignPersistent(sc->writable_cb_, writable_cb.As<Function>());
+  sc->recv_cb_.Reset(recv_cb.As<Function>());
+  sc->writable_cb_.Reset(writable_cb.As<Function>());
   sc->fd_ = fd;
 
   uv_poll_init(uv_default_loop(), &sc->handle_, fd);
@@ -167,8 +166,8 @@ void StopWatcher(int fd) {
   assert(iter != watchers.end());
 
   SocketContext* sc = iter->second;
-  NanDisposePersistent(sc->recv_cb_);
-  NanDisposePersistent(sc->writable_cb_);
+  sc->recv_cb_.Reset();
+  sc->writable_cb_.Reset();
   watchers.erase(iter);
 
   uv_poll_stop(&sc->handle_);
@@ -177,7 +176,7 @@ void StopWatcher(int fd) {
 
 
 NAN_METHOD(Socket) {
-  NanScope();
+  Nan::HandleScope scope;
   Local<Value> recv_cb;
   Local<Value> writable_cb;
   int protocol;
@@ -185,13 +184,13 @@ NAN_METHOD(Socket) {
   int type;
   int fd;
 
-  assert(args.Length() == 5);
+  assert(info.Length() == 5);
 
-  domain      = args[0]->Int32Value();
-  type        = args[1]->Int32Value();
-  protocol    = args[2]->Int32Value();
-  recv_cb     = args[3];
-  writable_cb = args[4];
+  domain      = info[0]->Int32Value();
+  type        = info[1]->Int32Value();
+  protocol    = info[2]->Int32Value();
+  recv_cb     = info[3];
+  writable_cb = info[4];
 
 #if defined(SOCK_NONBLOCK)
   type |= SOCK_NONBLOCK;
@@ -216,20 +215,20 @@ NAN_METHOD(Socket) {
   StartWatcher(fd, recv_cb, writable_cb);
 
 out:
-  NanReturnValue(NanNew(fd));
+  info.GetReturnValue().Set(fd);
 }
 
 
 NAN_METHOD(Bind) {
-  NanScope();
+  Nan::HandleScope scope;
   sockaddr_un s;
   int err;
   int fd;
 
-  assert(args.Length() == 2);
+  assert(info.Length() == 2);
 
-  fd = args[0]->Int32Value();
-  String::Utf8Value path(args[1]);
+  fd = info[0]->Int32Value();
+  String::Utf8Value path(info[1]);
 
   memset(&s, 0, sizeof(s));
   strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
@@ -239,11 +238,11 @@ NAN_METHOD(Bind) {
   if (bind(fd, reinterpret_cast<sockaddr*>(&s), sizeof(s)))
     err = -errno;
 
-  NanReturnValue(NanNew(err));
+  info.GetReturnValue().Set(err);
 }
 
 NAN_METHOD(SendTo) {
-  NanScope();
+  Nan::HandleScope scope;
   Local<Object> buf;
   sockaddr_un s;
   size_t offset;
@@ -254,13 +253,13 @@ NAN_METHOD(SendTo) {
   int fd;
   int r;
 
-  assert(args.Length() == 5);
+  assert(info.Length() == 5);
 
-  fd = args[0]->Int32Value();
-  buf = args[1]->ToObject();
-  offset = args[2]->Uint32Value();
-  length = args[3]->Uint32Value();
-  String::Utf8Value path(args[4]);
+  fd = info[0]->Int32Value();
+  buf = info[1]->ToObject();
+  offset = info[2]->Uint32Value();
+  length = info[3]->Uint32Value();
+  String::Utf8Value path(info[4]);
 
   assert(node::Buffer::HasInstance(buf));
   assert(offset + length <= node::Buffer::Length(buf));
@@ -286,11 +285,11 @@ NAN_METHOD(SendTo) {
   if (r == -1)
     err = -errno;
 
-  NanReturnValue(NanNew(err));
+  info.GetReturnValue().Set(err);
 }
 
 NAN_METHOD(Send) {
-  NanScope();
+  Nan::HandleScope scope;
   Local<Object> buf;
   msghdr msg;
   iovec iov;
@@ -298,10 +297,10 @@ NAN_METHOD(Send) {
   int fd;
   int r;
 
-  assert(args.Length() == 2);
+  assert(info.Length() == 2);
 
-  fd = args[0]->Int32Value();
-  buf = args[1]->ToObject();
+  fd = info[0]->Int32Value();
+  buf = info[1]->ToObject();
   assert(node::Buffer::HasInstance(buf));
 
   iov.iov_base = node::Buffer::Data(buf);
@@ -327,19 +326,19 @@ NAN_METHOD(Send) {
     }
   }
 
-  NanReturnValue(NanNew(err));
+  info.GetReturnValue().Set(err);
 }
 
 NAN_METHOD(Connect) {
-  NanScope();
+  Nan::HandleScope scope;
   sockaddr_un s;
   int err;
   int fd;
 
-  assert(args.Length() == 2);
+  assert(info.Length() == 2);
 
-  fd = args[0]->Int32Value();
-  String::Utf8Value path(args[1]);
+  fd = info[0]->Int32Value();
+  String::Utf8Value path(info[1]);
 
   memset(&s, 0, sizeof(s));
   strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
@@ -349,17 +348,17 @@ NAN_METHOD(Connect) {
   if (connect(fd, reinterpret_cast<sockaddr*>(&s), sizeof(s)))
     err = -errno;
 
-  NanReturnValue(NanNew(err));
+  info.GetReturnValue().Set(err);
 }
 
 
 NAN_METHOD(Close) {
-  NanScope();
+  Nan::HandleScope scope;
   int err;
   int fd;
 
-  assert(args.Length() == 1);
-  fd = args[0]->Int32Value();
+  assert(info.Length() == 1);
+  fd = info[0]->Int32Value();
 
   // Suppress EINTR and EINPROGRESS.  EINTR means that the close() system call
   // was interrupted by a signal.  According to POSIX, the file descriptor is
@@ -387,32 +386,32 @@ NAN_METHOD(Close) {
       err = -errno;
 
   StopWatcher(fd);
-  NanReturnValue(NanNew(err));
+  info.GetReturnValue().Set(err);
 }
 
 
-void Initialize(Handle<Object> target) {
+void Initialize(Local<Object> target) {
   // don't need to be read-only, only used by the JS shim
-  target->Set(NanNew("AF_UNIX"), NanNew(AF_UNIX));
-  target->Set(NanNew("SOCK_DGRAM"), NanNew(SOCK_DGRAM));
+  target->Set(Nan::New("AF_UNIX").ToLocalChecked(), Nan::New(AF_UNIX));
+  target->Set(Nan::New("SOCK_DGRAM").ToLocalChecked(), Nan::New(SOCK_DGRAM));
 
-  target->Set(NanNew("socket"),
-              NanNew<FunctionTemplate>(Socket)->GetFunction());
+  target->Set(Nan::New("socket").ToLocalChecked(),
+              Nan::New<FunctionTemplate>(Socket)->GetFunction());
 
-  target->Set(NanNew("bind"),
-              NanNew<FunctionTemplate>(Bind)->GetFunction());
+  target->Set(Nan::New("bind").ToLocalChecked(),
+              Nan::New<FunctionTemplate>(Bind)->GetFunction());
 
-  target->Set(NanNew("sendto"),
-              NanNew<FunctionTemplate>(SendTo)->GetFunction());
+  target->Set(Nan::New("sendto").ToLocalChecked(),
+              Nan::New<FunctionTemplate>(SendTo)->GetFunction());
 
-  target->Set(NanNew("send"),
-              NanNew<FunctionTemplate>(Send)->GetFunction());
+  target->Set(Nan::New("send").ToLocalChecked(),
+              Nan::New<FunctionTemplate>(Send)->GetFunction());
 
-  target->Set(NanNew("connect"),
-              NanNew<FunctionTemplate>(Connect)->GetFunction());
+  target->Set(Nan::New("connect").ToLocalChecked(),
+              Nan::New<FunctionTemplate>(Connect)->GetFunction());
 
-  target->Set(NanNew("close"),
-              NanNew<FunctionTemplate>(Close)->GetFunction());
+  target->Set(Nan::New("close").ToLocalChecked(),
+              Nan::New<FunctionTemplate>(Close)->GetFunction());
 }
 
 
