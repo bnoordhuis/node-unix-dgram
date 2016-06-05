@@ -334,20 +334,29 @@ NAN_METHOD(Connect) {
   sockaddr_un s;
   int err;
   int fd;
+  socklen_t namelen;
+  unsigned int len;
 
   assert(info.Length() == 2);
 
   fd = info[0]->Int32Value();
   String::Utf8Value path(info[1]);
+  len = path.length();
+  if (len > sizeof(s.sun_path)) {
+    err = -EINVAL;
+    goto out;
+  }
 
   memset(&s, 0, sizeof(s));
-  strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
+  memcpy(s.sun_path, *path, len);
   s.sun_family = AF_UNIX;
 
   err = 0;
-  if (connect(fd, reinterpret_cast<sockaddr*>(&s), sizeof(s)))
+  namelen = offsetof(struct sockaddr_un, sun_path) + len;
+  if (connect(fd, reinterpret_cast<sockaddr*>(&s), namelen))
     err = -errno;
 
+out:
   info.GetReturnValue().Set(err);
 }
 
