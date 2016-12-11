@@ -317,7 +317,7 @@ NAN_METHOD(Send) {
   err = 0;
   if (r == -1) {
     err = -errno;
-    if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+    if ((errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == ENOBUFS)) {
       watchers_t::iterator iter = watchers.find(fd);
       assert(iter != watchers.end());
       SocketContext* sc = iter->second;
