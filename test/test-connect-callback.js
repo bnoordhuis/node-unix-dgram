@@ -4,11 +4,12 @@ var fs = require('fs');
 var unix = require('../lib/unix_dgram');
 var SOCKNAME = '/tmp/unix_dgram.sock';
 
+var sentCount = 0;
 var seenCount = 0;
-var expected = 300; // arbitrary enough to generate congestion
+var expected = 300;
 
 process.on('exit', function() {
-  assert.equal(seenCount, expected);
+  assert.equal(seenCount, sentCount);
 });
 
 try { fs.unlinkSync(SOCKNAME); } catch (e) { /* swallow */ }
@@ -31,23 +32,34 @@ client.on('error', function(err) {
   assert(0);
 });
 
-// This test case create a huge congestion which throw a warn (possible EventEmitter memory leak detected)
-// In real process, it would be handled a smarter way (queued to re-send...)
-client.setMaxListeners(300);
-
 client.on('connect', function() {
   console.error('connected');
-  client.on('congestion', function(buf) {
-    client.once('writable', function() {
-      client.send(buf);
-    });
+
+  client.on('congestion', function() {
+    throw new Error('Should not emit congestion');
   });
 
-  var msg;
-  for(var i=0; i<expected; i++) {
-    msg = Buffer.from('PING' + i);
-    client.send(msg);
+  client.on('writable', function() {
+    // swallow
+  });
+
+  function send() {
+    var msg = Buffer('PING' + sentCount);
+    client.send(msg, function(err) {
+      if (!err) {
+        ++ sentCount;
+        if (sentCount < expected) {
+          process.nextTick(send);
+        }
+      } else if (err.code < 0) {
+        throw new Error(err);
+      } else {
+        client.once('writable', send);
+      }
+    });
   }
+
+  send();
 });
 
 client.connect(SOCKNAME);
