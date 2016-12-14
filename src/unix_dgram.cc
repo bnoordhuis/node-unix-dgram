@@ -108,8 +108,13 @@ void OnRecv(SocketContext* sc) {
     err = -errno;
   } else {
     argv[1] = Nan::CopyBuffer(scratch, err).ToLocalChecked();
-    if (u_addr.sun.sun_path[0] != '\0') {
-      argv[2] = Nan::New<String>(u_addr.sun.sun_path).ToLocalChecked();
+    if (msg.msg_namelen > 0) {
+      if (u_addr.sun.sun_path[0] != '\0') {
+        argv[2] = Nan::New<String>(u_addr.sun.sun_path).ToLocalChecked();
+      } else {
+        argv[2] = Nan::New<String>(u_addr.sun.sun_path,
+                    msg.msg_namelen-sizeof(sa_family_t)).ToLocalChecked();
+      }
     }
   }
 
@@ -219,25 +224,45 @@ out:
 }
 
 
+inline int addrSetup(String::Utf8Value& path, sockaddr_un& s) {
+  unsigned int len;
+
+  len = path.length();
+  if (((*path)[0] == '\0' && len > sizeof(s.sun_path)) ||
+      ((*path)[0] != '\0' && len >= sizeof(s.sun_path))) {
+    return -EINVAL;
+  }
+
+  memset(&s, 0, sizeof(s));
+  memcpy(s.sun_path, *path, len);
+
+  return offsetof(struct sockaddr_un, sun_path) + len;
+}
+
+
 NAN_METHOD(Bind) {
   Nan::HandleScope scope;
   sockaddr_un s;
   int err;
   int fd;
+  socklen_t namelen;
 
   assert(info.Length() == 2);
 
   fd = info[0]->Int32Value();
   String::Utf8Value path(info[1]);
 
-  memset(&s, 0, sizeof(s));
-  strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
+  err = addrSetup(path, s);
+  if (err < 0)
+    goto out;
+  namelen = err;
   s.sun_family = AF_UNIX;
 
   err = 0;
-  if (bind(fd, reinterpret_cast<sockaddr*>(&s), sizeof(s)))
+  if (bind(fd, reinterpret_cast<sockaddr*>(&s), namelen))
     err = -errno;
 
+out:
   info.GetReturnValue().Set(err);
 }
 
@@ -252,6 +277,7 @@ NAN_METHOD(SendTo) {
   int err;
   int fd;
   int r;
+  socklen_t namelen;
 
   assert(info.Length() == 5);
 
@@ -261,21 +287,24 @@ NAN_METHOD(SendTo) {
   length = info[3]->Uint32Value();
   String::Utf8Value path(info[4]);
 
+  err = addrSetup(path, s);
+  if (err < 0)
+    goto out;
+  namelen = err;
+
   assert(node::Buffer::HasInstance(buf));
   assert(offset + length <= node::Buffer::Length(buf));
 
   iov.iov_base = node::Buffer::Data(buf) + offset;
   iov.iov_len = length;
 
-  memset(&s, 0, sizeof(s));
-  strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
   s.sun_family = AF_UNIX;
 
   memset(&msg, 0, sizeof msg);
   msg.msg_iovlen = 1;
   msg.msg_iov = &iov;
   msg.msg_name = reinterpret_cast<void*>(&s);
-  msg.msg_namelen = sizeof(s);
+  msg.msg_namelen = namelen;
 
   do
     r = sendmsg(fd, &msg, 0);
@@ -285,6 +314,7 @@ NAN_METHOD(SendTo) {
   if (r == -1)
     err = -errno;
 
+out:
   info.GetReturnValue().Set(err);
 }
 
@@ -334,20 +364,24 @@ NAN_METHOD(Connect) {
   sockaddr_un s;
   int err;
   int fd;
+  socklen_t namelen;
 
   assert(info.Length() == 2);
 
   fd = info[0]->Int32Value();
   String::Utf8Value path(info[1]);
 
-  memset(&s, 0, sizeof(s));
-  strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
+  err = addrSetup(path, s);
+  if (err < 0)
+    goto out;
+  namelen = err;
   s.sun_family = AF_UNIX;
 
   err = 0;
-  if (connect(fd, reinterpret_cast<sockaddr*>(&s), sizeof(s)))
+  if (connect(fd, reinterpret_cast<sockaddr*>(&s), namelen))
     err = -errno;
 
+out:
   info.GetReturnValue().Set(err);
 }
 
