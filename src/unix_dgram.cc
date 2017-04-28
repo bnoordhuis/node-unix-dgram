@@ -83,7 +83,7 @@ void OnRecv(SocketContext* sc) {
 
   /* Union to avoid breaking strict-aliasing rules */
   union {
-    struct sockaddr_un sun;
+    struct sockaddr_un s;
     struct sockaddr_storage ss;
   } u_addr;
 
@@ -92,7 +92,7 @@ void OnRecv(SocketContext* sc) {
   iov.iov_base = scratch;
   iov.iov_len = sizeof scratch;
 
-  u_addr.sun.sun_path[0] = '\0';
+  u_addr.s.sun_path[0] = '\0';
 
   memset(&msg, 0, sizeof msg);
   msg.msg_iovlen = 1;
@@ -108,8 +108,8 @@ void OnRecv(SocketContext* sc) {
     err = -errno;
   } else {
     argv[1] = Nan::CopyBuffer(scratch, err).ToLocalChecked();
-    if (u_addr.sun.sun_path[0] != '\0') {
-      argv[2] = Nan::New<String>(u_addr.sun.sun_path).ToLocalChecked();
+    if (u_addr.s.sun_path[0] != '\0') {
+      argv[2] = Nan::New<String>(u_addr.s.sun_path).ToLocalChecked();
     }
   }
 
