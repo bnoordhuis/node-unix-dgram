@@ -39,8 +39,8 @@ using v8::String;
 using v8::Value;
 
 struct SocketContext {
-  Nan::Persistent<Function> recv_cb_;
-  Nan::Persistent<Function> writable_cb_;
+  Nan::Callback recv_cb_;
+  Nan::Callback writable_cb_;
   uv_poll_t handle_;
   int fd_;
 };
@@ -115,18 +115,13 @@ void OnRecv(SocketContext* sc) {
 
   argv[0] = Nan::New<Integer>(static_cast<int32_t>(err));
 
-  Nan::MakeCallback(Nan::GetCurrentContext()->Global(),
-                    Nan::New(sc->recv_cb_),
-                    sizeof(argv) / sizeof(argv[0]),
-                    argv);
+  Nan::Call(sc->recv_cb_, sizeof(argv) / sizeof(argv[0]), argv);
 }
 
 void OnWritable(SocketContext* sc) {
   Nan::HandleScope scope;
   uv_poll_start(&sc->handle_, UV_READABLE, OnEvent);
-  Nan::MakeCallback(Nan::GetCurrentContext()->Global(),
-                    Nan::New(sc->writable_cb_),
-                    0, NULL);
+  Nan::Call(sc->writable_cb_, 0, NULL);
 }
 
 void OnEvent(uv_poll_t* handle, int status, int events) {
@@ -186,9 +181,9 @@ NAN_METHOD(Socket) {
 
   assert(info.Length() == 5);
 
-  domain      = info[0]->Int32Value();
-  type        = info[1]->Int32Value();
-  protocol    = info[2]->Int32Value();
+  domain      = Nan::To<int32_t>(info[0]).FromJust();
+  type        = Nan::To<int32_t>(info[1]).FromJust();
+  protocol    = Nan::To<int32_t>(info[2]).FromJust();
   recv_cb     = info[3];
   writable_cb = info[4];
 
@@ -227,8 +222,8 @@ NAN_METHOD(Bind) {
 
   assert(info.Length() == 2);
 
-  fd = info[0]->Int32Value();
-  String::Utf8Value path(info[1]);
+  fd = Nan::To<int32_t>(info[0]).FromJust();
+  Nan::Utf8String path(info[1]);
 
   memset(&s, 0, sizeof(s));
   strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
@@ -255,11 +250,11 @@ NAN_METHOD(SendTo) {
 
   assert(info.Length() == 5);
 
-  fd = info[0]->Int32Value();
-  buf = info[1]->ToObject();
-  offset = info[2]->Uint32Value();
-  length = info[3]->Uint32Value();
-  String::Utf8Value path(info[4]);
+  fd = Nan::To<int32_t>(info[0]).FromJust();
+  buf = Nan::To<Object>(info[1]).ToLocalChecked();
+  offset = Nan::To<uint32_t>(info[2]).FromJust();
+  length = Nan::To<uint32_t>(info[3]).FromJust();
+  Nan::Utf8String path(info[4]);
 
   assert(node::Buffer::HasInstance(buf));
   assert(offset + length <= node::Buffer::Length(buf));
@@ -299,8 +294,8 @@ NAN_METHOD(Send) {
 
   assert(info.Length() == 2);
 
-  fd = info[0]->Int32Value();
-  buf = info[1]->ToObject();
+  fd = Nan::To<int32_t>(info[0]).FromJust();
+  buf = Nan::To<Object>(info[1]).ToLocalChecked();
   assert(node::Buffer::HasInstance(buf));
 
   iov.iov_base = node::Buffer::Data(buf);
@@ -337,8 +332,8 @@ NAN_METHOD(Connect) {
 
   assert(info.Length() == 2);
 
-  fd = info[0]->Int32Value();
-  String::Utf8Value path(info[1]);
+  fd = Nan::To<int32_t>(info[0]).FromJust();
+  Nan::Utf8String path(info[1]);
 
   memset(&s, 0, sizeof(s));
   strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
@@ -358,7 +353,7 @@ NAN_METHOD(Close) {
   int fd;
 
   assert(info.Length() == 1);
-  fd = info[0]->Int32Value();
+  fd = Nan::To<int32_t>(info[0]).FromJust();
 
   // Suppress EINTR and EINPROGRESS.  EINTR means that the close() system call
   // was interrupted by a signal.  According to POSIX, the file descriptor is
@@ -392,26 +387,15 @@ NAN_METHOD(Close) {
 
 void Initialize(Local<Object> target) {
   // don't need to be read-only, only used by the JS shim
-  target->Set(Nan::New("AF_UNIX").ToLocalChecked(), Nan::New(AF_UNIX));
-  target->Set(Nan::New("SOCK_DGRAM").ToLocalChecked(), Nan::New(SOCK_DGRAM));
-
-  target->Set(Nan::New("socket").ToLocalChecked(),
-              Nan::New<FunctionTemplate>(Socket)->GetFunction());
-
-  target->Set(Nan::New("bind").ToLocalChecked(),
-              Nan::New<FunctionTemplate>(Bind)->GetFunction());
-
-  target->Set(Nan::New("sendto").ToLocalChecked(),
-              Nan::New<FunctionTemplate>(SendTo)->GetFunction());
-
-  target->Set(Nan::New("send").ToLocalChecked(),
-              Nan::New<FunctionTemplate>(Send)->GetFunction());
-
-  target->Set(Nan::New("connect").ToLocalChecked(),
-              Nan::New<FunctionTemplate>(Connect)->GetFunction());
-
-  target->Set(Nan::New("close").ToLocalChecked(),
-              Nan::New<FunctionTemplate>(Close)->GetFunction());
+  Nan::Set(target, Nan::New("AF_UNIX").ToLocalChecked(), Nan::New(AF_UNIX));
+  Nan::Set(target, Nan::New("SOCK_DGRAM").ToLocalChecked(),
+           Nan::New(SOCK_DGRAM));
+  Nan::SetMethod(target, "socket", Socket);
+  Nan::SetMethod(target, "bind", Bind);
+  Nan::SetMethod(target, "sendto", SendTo);
+  Nan::SetMethod(target, "send", Send);
+  Nan::SetMethod(target, "connect", Connect);
+  Nan::SetMethod(target, "close", Close);
 }
 
 
