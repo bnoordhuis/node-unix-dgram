@@ -49,7 +49,10 @@ client.on('connect', function() {
       if (!err) {
         ++ sentCount;
         if (sentCount < expected) {
-          process.nextTick(send);
+          // process.nextTick() in today's Node.js master seems to stall
+          // after about ~194 process.nextTick() calls, that's why we
+          // use setImmediate() as a workaround.
+          setImmediate(send);
         }
       } else if (err.code < 0) {
         throw new Error(err);
