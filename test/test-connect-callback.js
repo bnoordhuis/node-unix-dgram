@@ -44,7 +44,7 @@ client.on('connect', function() {
   });
 
   function send() {
-    var msg = Buffer('PING' + sentCount);
+    var msg = Buffer.from('PING' + sentCount);
     client.send(msg, function(err) {
       if (!err) {
         ++ sentCount;

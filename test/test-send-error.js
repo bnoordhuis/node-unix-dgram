@@ -17,10 +17,10 @@ client.once('error', function(err) {
     assert.ifError(err);
   });
 
-  client.send(Buffer('ERROR2'), 0, 6, SOCKNAME, function(err) {
+  client.send(Buffer.from('ERROR2'), 0, 6, SOCKNAME, function(err) {
     assert.ok(err);
     client.close();
   });
 });
 
-client.send(Buffer('ERROR1'), 0, 6, SOCKNAME);
+client.send(Buffer.from('ERROR1'), 0, 6, SOCKNAME);

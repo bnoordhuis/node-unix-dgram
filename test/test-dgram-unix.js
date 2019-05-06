@@ -30,7 +30,7 @@ var server = unix.createSocket('unix_dgram', function(buf, rinfo) {
       assert.equal(rinfo.path, null);
       seenPing1 = true;
       client.bind(SOCKNAME_CLIENT);
-      client.send(Buffer('PING2'), 0, 5, SOCKNAME, function() {
+      client.send(Buffer.from('PING2'), 0, 5, SOCKNAME, function() {
         console.error('client send', arguments);
         sentPing2 = true;
       });
@@ -52,7 +52,7 @@ var client = unix.createSocket('unix_dgram', function(buf, rinfo) {
   assert(0);
 });
 
-client.send(Buffer('PING1'), 0, 5, SOCKNAME, function() {
+client.send(Buffer.from('PING1'), 0, 5, SOCKNAME, function() {
   console.error('client send', arguments);
   sentPing1 = true;
 });
