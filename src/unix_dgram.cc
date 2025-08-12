@@ -16,6 +16,7 @@
 #include <sys/un.h>
 
 #include <map>
+#include <vector>
 
 #define offset_of(type, member)                                               \
   ((intptr_t) ((char *) &(((type *) 8)->member) - 8))
@@ -75,11 +76,12 @@ inline void SetCloExec(int fd) {
 
 void OnRecv(SocketContext* sc) {
   Nan::HandleScope scope;
-  Local<Value> argv[3];
+  Local<Value> argv[4];
   msghdr msg;
   iovec iov;
   ssize_t err;
   char scratch[65536];
+  char control[CMSG_SPACE(sizeof(int) * 256)];
 
   /* Union to avoid breaking strict-aliasing rules */
   union {
@@ -87,7 +89,7 @@ void OnRecv(SocketContext* sc) {
     struct sockaddr_storage ss;
   } u_addr;
 
-  argv[0] = argv[1] = argv[2] = Nan::Null();
+  argv[0] = argv[1] = argv[2] = argv[3] = Nan::Null();
 
   iov.iov_base = scratch;
   iov.iov_len = sizeof scratch;
@@ -99,6 +101,8 @@ void OnRecv(SocketContext* sc) {
   msg.msg_iov = &iov;
   msg.msg_name = &u_addr.ss;
   msg.msg_namelen = sizeof u_addr.ss;
+  msg.msg_control = control;
+  msg.msg_controllen = sizeof control;
 
   do
     err = recvmsg(sc->fd_, &msg, 0);
@@ -110,6 +114,26 @@ void OnRecv(SocketContext* sc) {
     argv[1] = Nan::CopyBuffer(scratch, err).ToLocalChecked();
     if (u_addr.s.sun_path[0] != '\0') {
       argv[2] = Nan::New<String>(u_addr.s.sun_path).ToLocalChecked();
+    }
+
+    std::vector<int> fds;
+    struct cmsghdr *cmsg;
+    for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+      if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS) {
+        int *fd_ptr = (int *) CMSG_DATA(cmsg);
+        int fd_count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+        for (int i = 0; i < fd_count; i++) {
+          fds.push_back(fd_ptr[i]);
+        }
+      }
+    }
+
+    if (!fds.empty()) {
+      Local<v8::Array> fd_array = Nan::New<v8::Array>(fds.size());
+      for (size_t i = 0; i < fds.size(); i++) {
+        Nan::Set(fd_array, i, Nan::New<Integer>(fds[i]));
+      }
+      argv[3] = fd_array;
     }
   }
 
@@ -239,6 +263,7 @@ NAN_METHOD(Bind) {
 NAN_METHOD(SendTo) {
   Nan::HandleScope scope;
   Local<Object> buf;
+  Local<v8::Array> fds_array;
   sockaddr_un s;
   size_t offset;
   size_t length;
@@ -248,13 +273,14 @@ NAN_METHOD(SendTo) {
   int fd;
   int r;
 
-  assert(info.Length() == 5);
+  assert(info.Length() == 6);
 
   fd = Nan::To<int32_t>(info[0]).FromJust();
   buf = Nan::To<Object>(info[1]).ToLocalChecked();
   offset = Nan::To<uint32_t>(info[2]).FromJust();
   length = Nan::To<uint32_t>(info[3]).FromJust();
   Nan::Utf8String path(info[4]);
+  fds_array = Local<v8::Array>::Cast(info[5]);
 
   assert(node::Buffer::HasInstance(buf));
   assert(offset + length <= node::Buffer::Length(buf));
@@ -272,9 +298,35 @@ NAN_METHOD(SendTo) {
   msg.msg_name = reinterpret_cast<void*>(&s);
   msg.msg_namelen = sizeof(s);
 
+  uint32_t fd_count = fds_array->Length();
+  char *control = NULL;
+  if (fd_count > 0) {
+    size_t cmsg_len = CMSG_SPACE(sizeof(int) * fd_count);
+    control = new char[cmsg_len];
+    memset(control, 0, cmsg_len);
+
+    msg.msg_control = control;
+    msg.msg_controllen = cmsg_len;
+
+    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    cmsg->cmsg_len = CMSG_LEN(sizeof(int) * fd_count);
+
+    int *fd_ptr = (int *) CMSG_DATA(cmsg);
+    for (uint32_t i = 0; i < fd_count; i++) {
+      Local<Value> fd_val = Nan::Get(fds_array, i).ToLocalChecked();
+      fd_ptr[i] = Nan::To<int32_t>(fd_val).FromJust();
+    }
+  }
+
   do
     r = sendmsg(fd, &msg, 0);
   while (r == -1 && errno == EINTR);
+
+  if (fd_count > 0) {
+    delete[] control;
+  }
 
   err = 0;
   if (r == -1)
@@ -286,16 +338,18 @@ NAN_METHOD(SendTo) {
 NAN_METHOD(Send) {
   Nan::HandleScope scope;
   Local<Object> buf;
+  Local<v8::Array> fds_array;
   msghdr msg;
   iovec iov;
   int err;
   int fd;
   int r;
 
-  assert(info.Length() == 2);
+  assert(info.Length() == 3);
 
   fd = Nan::To<int32_t>(info[0]).FromJust();
   buf = Nan::To<Object>(info[1]).ToLocalChecked();
+  fds_array = Local<v8::Array>::Cast(info[2]);
   assert(node::Buffer::HasInstance(buf));
 
   iov.iov_base = node::Buffer::Data(buf);
@@ -305,9 +359,35 @@ NAN_METHOD(Send) {
   msg.msg_iovlen = 1;
   msg.msg_iov = &iov;
 
+  uint32_t fd_count = fds_array->Length();
+  char *control = NULL;
+  if (fd_count > 0) {
+    size_t cmsg_len = CMSG_SPACE(sizeof(int) * fd_count);
+    control = new char[cmsg_len];
+    memset(control, 0, cmsg_len);
+
+    msg.msg_control = control;
+    msg.msg_controllen = cmsg_len;
+
+    struct cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
+    cmsg->cmsg_level = SOL_SOCKET;
+    cmsg->cmsg_type = SCM_RIGHTS;
+    cmsg->cmsg_len = CMSG_LEN(sizeof(int) * fd_count);
+
+    int *fd_ptr = (int *) CMSG_DATA(cmsg);
+    for (uint32_t i = 0; i < fd_count; i++) {
+      Local<Value> fd_val = Nan::Get(fds_array, i).ToLocalChecked();
+      fd_ptr[i] = Nan::To<int32_t>(fd_val).FromJust();
+    }
+  }
+
   do
     r = sendmsg(fd, &msg, 0);
   while (r == -1 && errno == EINTR);
+
+  if (fd_count > 0) {
+    delete[] control;
+  }
 
   err = 0;
   if (r == -1) {
