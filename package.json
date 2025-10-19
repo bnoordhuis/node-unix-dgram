@@ -8,6 +8,7 @@
   "version": "2.0.7",
   "description": "Unix datagram socket",
   "main": "lib/unix_dgram",
+  "types": "lib/unix_dgram.d.ts",
   "homepage": "https://github.com/bnoordhuis/node-unix-dgram",
   "license": {
     "type": "ISC",
@@ -24,7 +25,9 @@
     "bindings": "^1.5.0",
     "nan": "^2.20.0"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "typed-emitter": "^2.1.0"
+  },
   "optionalDependencies": {},
   "scripts": {
     "test": "node test/test-dgram-unix.js && node test/test-connect.js && node test/test-connect-callback.js && node test/test-send-error.js"
