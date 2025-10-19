@@ -1,7 +1,6 @@
 /// <reference types="node" />
 
 import { EventEmitter } from "events";
-import { AddressInfo } from "net";
 import TypedEmitter from "typed-emitter";
 
 export function createSocket(
@@ -11,7 +10,7 @@ export function createSocket(
 
 export interface RemoteInfo {
   size: number;
-  address: AddressInfo | {};
+  address: Record<string, never>;
   path: string;
 }
 
@@ -44,4 +43,3 @@ export class Socket
   ): void;
   close(): void;
 }
-
