@@ -105,3 +105,8 @@ Example:
 Close the socket.  If the socket was bound to a path with `socket.bind()`,
 then you will no longer receive new messages.  The file system entity
 (the socket file) is not automatically unlinked.
+
+### socket.unref()
+
+Calling unref() on a socket will allow the program to exit if this is the only active socket in the event system.
+If the socket is already unrefed calling unref() again will have no effect.

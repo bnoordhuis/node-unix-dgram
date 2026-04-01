@@ -384,6 +384,22 @@ NAN_METHOD(Close) {
   info.GetReturnValue().Set(err);
 }
 
+NAN_METHOD(Unref) {
+  Nan::HandleScope scope;
+  int fd;
+
+  assert(info.Length() == 1);
+  fd = Nan::To<int32_t>(info[0]).FromJust();
+
+  watchers_t::iterator iter = watchers.find(fd);
+  if (iter != watchers.end()) {
+    SocketContext* sc = iter->second;
+    uv_unref(reinterpret_cast<uv_handle_t*>(&sc->handle_));
+  }
+
+  info.GetReturnValue().SetUndefined();
+}
+
 
 void Initialize(Local<Object> target) {
   // don't need to be read-only, only used by the JS shim
@@ -396,6 +412,7 @@ void Initialize(Local<Object> target) {
   Nan::SetMethod(target, "send", Send);
   Nan::SetMethod(target, "connect", Connect);
   Nan::SetMethod(target, "close", Close);
+  Nan::SetMethod(target, "unref", Unref);
 }
 
 
