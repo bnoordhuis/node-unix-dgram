@@ -36,6 +36,12 @@ using v8::Object;
 using v8::String;
 using v8::Value;
 
+struct ScopedLock {
+  explicit ScopedLock(uv_mutex_t* mtx) : mtx_(mtx) { uv_mutex_lock(mtx_); }
+  ~ScopedLock() { uv_mutex_unlock(mtx_); }
+  uv_mutex_t* mtx_;
+};
+
 struct SocketContext {
   Nan::Callback recv_cb_;
   Nan::Callback writable_cb_;
@@ -45,6 +51,7 @@ struct SocketContext {
 
 typedef std::map<int, SocketContext*> watchers_t;
 
+uv_mutex_t watchers_lock;
 std::map<Isolate*, watchers_t> watchers;
 
 
@@ -206,6 +213,7 @@ NAN_METHOD(Socket) {
     SetCloExec(fd);
 #endif
     Isolate* isolate = Isolate::GetCurrent();
+    ScopedLock scoped_lock(&watchers_lock);
     StartWatcher(&watchers[isolate], fd, recv_cb, writable_cb);
   }
 
@@ -312,11 +320,15 @@ NAN_METHOD(Send) {
   if (r == -1) {
     err = -errno;
     if ((errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == ENOBUFS)) {
-      Isolate* isolate = Isolate::GetCurrent();
-      watchers_t* w = &watchers[isolate];
-      watchers_t::iterator iter = w->find(fd);
-      assert(iter != w->end());
-      SocketContext* sc = iter->second;
+      SocketContext* sc;
+      {
+        Isolate* isolate = Isolate::GetCurrent();
+        ScopedLock scoped_lock(&watchers_lock);
+        watchers_t* w = &watchers[isolate];
+        watchers_t::iterator iter = w->find(fd);
+        assert(iter != w->end());
+        sc = iter->second;
+      }
       uv_poll_start(&sc->handle_, UV_READABLE | UV_WRITABLE, OnEvent);
       err = 1;
     }
@@ -381,19 +393,28 @@ NAN_METHOD(Close) {
     if (errno != EINTR && errno != EINPROGRESS)
       err = -errno;
 
-  Isolate* isolate = Isolate::GetCurrent();
-  StopWatcher(&watchers[isolate], fd);
+  {
+    Isolate* isolate = Isolate::GetCurrent();
+    ScopedLock scoped_lock(&watchers_lock);
+    StopWatcher(&watchers[isolate], fd);
+  }
   info.GetReturnValue().Set(err);
 }
 
 
 void AtExit(void* unused) {
+  ScopedLock scoped_lock(&watchers_lock);
   watchers.erase(Isolate::GetCurrent());
 }
 
 
 void Initialize(Local<Object> exports, Local<Value> module_,
                 Local<Context> context, void* priv) {
+  static uv_once_t once;
+  uv_once(&once, []() {
+    if (uv_mutex_init(&watchers_lock))
+      abort();
+  });
   // don't need to be read-only, only used by the JS shim
   Nan::Set(exports, Nan::New("AF_UNIX").ToLocalChecked(), Nan::New(AF_UNIX));
   Nan::Set(exports, Nan::New("SOCK_DGRAM").ToLocalChecked(),
