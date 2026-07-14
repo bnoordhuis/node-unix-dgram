@@ -29,14 +29,18 @@ void OnEvent(uv_poll_t* handle, int status, int events);
 
 using v8::Context;
 using v8::Function;
-using v8::FunctionTemplate;
 using v8::Integer;
+using v8::Isolate;
 using v8::Local;
-using v8::Null;
 using v8::Object;
-using v8::Persistent;
 using v8::String;
 using v8::Value;
+
+struct ScopedLock {
+  explicit ScopedLock(uv_mutex_t* mtx) : mtx_(mtx) { uv_mutex_lock(mtx_); }
+  ~ScopedLock() { uv_mutex_unlock(mtx_); }
+  uv_mutex_t* mtx_;
+};
 
 struct SocketContext {
   Nan::Callback recv_cb_;
@@ -47,7 +51,8 @@ struct SocketContext {
 
 typedef std::map<int, SocketContext*> watchers_t;
 
-watchers_t watchers;
+uv_mutex_t watchers_lock;
+std::map<Isolate*, watchers_t> watchers;
 
 
 inline void SetNonBlock(int fd) {
@@ -135,18 +140,21 @@ void OnEvent(uv_poll_t* handle, int status, int events) {
     OnWritable(sc);
 }
 
-void StartWatcher(int fd, Local<Value> recv_cb, Local<Value> writable_cb) {
+void StartWatcher(watchers_t* w, int fd, Local<Value> recv_cb,
+                  Local<Value> writable_cb) {
   // start listening for incoming dgrams
   SocketContext* sc = new SocketContext;
   sc->recv_cb_.Reset(recv_cb.As<Function>());
   sc->writable_cb_.Reset(writable_cb.As<Function>());
   sc->fd_ = fd;
 
-  uv_poll_init(uv_default_loop(), &sc->handle_, fd);
+  Isolate* isolate = Isolate::GetCurrent();
+  uv_loop_t* loop = node::GetCurrentEventLoop(isolate);
+  uv_poll_init(loop, &sc->handle_, fd);
   uv_poll_start(&sc->handle_, UV_READABLE, OnEvent);
 
   // so we can disarm the watcher when close(fd) is called
-  watchers.insert(watchers_t::value_type(fd, sc));
+  w->insert(watchers_t::value_type(fd, sc));
 }
 
 
@@ -156,14 +164,14 @@ void FreeSocketContext(uv_handle_t* handle) {
 }
 
 
-void StopWatcher(int fd) {
-  watchers_t::iterator iter = watchers.find(fd);
-  assert(iter != watchers.end());
+void StopWatcher(watchers_t* w, int fd) {
+  watchers_t::iterator iter = w->find(fd);
+  assert(iter != w->end());
 
   SocketContext* sc = iter->second;
   sc->recv_cb_.Reset();
   sc->writable_cb_.Reset();
-  watchers.erase(iter);
+  w->erase(iter);
 
   uv_poll_stop(&sc->handle_);
   uv_close(reinterpret_cast<uv_handle_t*>(&sc->handle_), FreeSocketContext);
@@ -197,19 +205,18 @@ NAN_METHOD(Socket) {
   fd = socket(domain, type, protocol);
   if (fd == -1) {
     fd = -errno;
-    goto out;
-  }
-
- #if !defined(SOCK_NONBLOCK)
-  SetNonBlock(fd);
+  } else {
+#if !defined(SOCK_NONBLOCK)
+    SetNonBlock(fd);
 #endif
 #if !defined(SOCK_CLOEXEC)
-  SetCloExec(fd);
+    SetCloExec(fd);
 #endif
+    Isolate* isolate = Isolate::GetCurrent();
+    ScopedLock scoped_lock(&watchers_lock);
+    StartWatcher(&watchers[isolate], fd, recv_cb, writable_cb);
+  }
 
-  StartWatcher(fd, recv_cb, writable_cb);
-
-out:
   info.GetReturnValue().Set(fd);
 }
 
@@ -313,9 +320,15 @@ NAN_METHOD(Send) {
   if (r == -1) {
     err = -errno;
     if ((errno == EAGAIN) || (errno == EWOULDBLOCK) || (errno == ENOBUFS)) {
-      watchers_t::iterator iter = watchers.find(fd);
-      assert(iter != watchers.end());
-      SocketContext* sc = iter->second;
+      SocketContext* sc;
+      {
+        Isolate* isolate = Isolate::GetCurrent();
+        ScopedLock scoped_lock(&watchers_lock);
+        watchers_t* w = &watchers[isolate];
+        watchers_t::iterator iter = w->find(fd);
+        assert(iter != w->end());
+        sc = iter->second;
+      }
       uv_poll_start(&sc->handle_, UV_READABLE | UV_WRITABLE, OnEvent);
       err = 1;
     }
@@ -380,25 +393,43 @@ NAN_METHOD(Close) {
     if (errno != EINTR && errno != EINPROGRESS)
       err = -errno;
 
-  StopWatcher(fd);
+  {
+    Isolate* isolate = Isolate::GetCurrent();
+    ScopedLock scoped_lock(&watchers_lock);
+    StopWatcher(&watchers[isolate], fd);
+  }
   info.GetReturnValue().Set(err);
 }
 
 
-void Initialize(Local<Object> target) {
+void AtExit(void* unused) {
+  ScopedLock scoped_lock(&watchers_lock);
+  watchers.erase(Isolate::GetCurrent());
+}
+
+
+void Initialize(Local<Object> exports, Local<Value> module_,
+                Local<Context> context, void* priv) {
+  static uv_once_t once;
+  uv_once(&once, []() {
+    if (uv_mutex_init(&watchers_lock))
+      abort();
+  });
   // don't need to be read-only, only used by the JS shim
-  Nan::Set(target, Nan::New("AF_UNIX").ToLocalChecked(), Nan::New(AF_UNIX));
-  Nan::Set(target, Nan::New("SOCK_DGRAM").ToLocalChecked(),
+  Nan::Set(exports, Nan::New("AF_UNIX").ToLocalChecked(), Nan::New(AF_UNIX));
+  Nan::Set(exports, Nan::New("SOCK_DGRAM").ToLocalChecked(),
            Nan::New(SOCK_DGRAM));
-  Nan::SetMethod(target, "socket", Socket);
-  Nan::SetMethod(target, "bind", Bind);
-  Nan::SetMethod(target, "sendto", SendTo);
-  Nan::SetMethod(target, "send", Send);
-  Nan::SetMethod(target, "connect", Connect);
-  Nan::SetMethod(target, "close", Close);
+  Nan::SetMethod(exports, "socket", Socket);
+  Nan::SetMethod(exports, "bind", Bind);
+  Nan::SetMethod(exports, "sendto", SendTo);
+  Nan::SetMethod(exports, "send", Send);
+  Nan::SetMethod(exports, "connect", Connect);
+  Nan::SetMethod(exports, "close", Close);
+  node::Environment* env = node::GetCurrentEnvironment(context);
+  node::AtExit(env, AtExit, NULL);
 }
 
 
 } // anonymous namespace
 
-NODE_MODULE(unix_dgram, Initialize)
+NODE_MODULE_CONTEXT_AWARE(unix_dgram, Initialize)
