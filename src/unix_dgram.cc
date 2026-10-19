@@ -189,9 +189,14 @@ NAN_METHOD(Socket) {
 
   assert(info.Length() == 5);
 
-  domain      = Nan::To<int32_t>(info[0]).FromJust();
-  type        = Nan::To<int32_t>(info[1]).FromJust();
-  protocol    = Nan::To<int32_t>(info[2]).FromJust();
+  if (!Nan::To<int32_t>(info[0]).To(&domain) ||
+      !Nan::To<int32_t>(info[1]).To(&type) ||
+      !Nan::To<int32_t>(info[2]).To(&protocol))
+    return;
+
+  if (!info[3]->IsFunction() || !info[4]->IsFunction())
+    return Nan::ThrowTypeError("callbacks must be functions");
+
   recv_cb     = info[3];
   writable_cb = info[4];
 
@@ -223,14 +228,19 @@ NAN_METHOD(Socket) {
 
 NAN_METHOD(Bind) {
   Nan::HandleScope scope;
+  Local<String> path_string;
   sockaddr_un s;
   int err;
   int fd;
 
   assert(info.Length() == 2);
 
-  fd = Nan::To<int32_t>(info[0]).FromJust();
-  Nan::Utf8String path(info[1]);
+  if (!Nan::To<int32_t>(info[0]).To(&fd))
+    return;
+  if (!Nan::To<String>(info[1]).ToLocal(&path_string))
+    return;
+
+  Nan::Utf8String path(path_string);
 
   memset(&s, 0, sizeof(s));
   strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
@@ -246,7 +256,10 @@ NAN_METHOD(Bind) {
 NAN_METHOD(SendTo) {
   Nan::HandleScope scope;
   Local<Object> buf;
+  Local<String> path_string;
   sockaddr_un s;
+  uint32_t offset_arg;
+  uint32_t length_arg;
   size_t offset;
   size_t length;
   msghdr msg;
@@ -257,13 +270,21 @@ NAN_METHOD(SendTo) {
 
   assert(info.Length() == 5);
 
-  fd = Nan::To<int32_t>(info[0]).FromJust();
-  buf = Nan::To<Object>(info[1]).ToLocalChecked();
-  offset = Nan::To<uint32_t>(info[2]).FromJust();
-  length = Nan::To<uint32_t>(info[3]).FromJust();
-  Nan::Utf8String path(info[4]);
+  if (!Nan::To<int32_t>(info[0]).To(&fd))
+    return;
+  if (!node::Buffer::HasInstance(info[1]))
+    return Nan::ThrowTypeError("buf must be a buffer");
+  if (!Nan::To<uint32_t>(info[2]).To(&offset_arg) ||
+      !Nan::To<uint32_t>(info[3]).To(&length_arg))
+    return;
+  if (!Nan::To<String>(info[4]).ToLocal(&path_string))
+    return;
 
-  assert(node::Buffer::HasInstance(buf));
+  buf = info[1].As<Object>();
+  offset = offset_arg;
+  length = length_arg;
+  Nan::Utf8String path(path_string);
+
   assert(offset + length <= node::Buffer::Length(buf));
 
   iov.iov_base = node::Buffer::Data(buf) + offset;
@@ -301,9 +322,12 @@ NAN_METHOD(Send) {
 
   assert(info.Length() == 2);
 
-  fd = Nan::To<int32_t>(info[0]).FromJust();
-  buf = Nan::To<Object>(info[1]).ToLocalChecked();
-  assert(node::Buffer::HasInstance(buf));
+  if (!Nan::To<int32_t>(info[0]).To(&fd))
+    return;
+  if (!node::Buffer::HasInstance(info[1]))
+    return Nan::ThrowTypeError("buf must be a buffer");
+
+  buf = info[1].As<Object>();
 
   iov.iov_base = node::Buffer::Data(buf);
   iov.iov_len = node::Buffer::Length(buf);
@@ -339,14 +363,19 @@ NAN_METHOD(Send) {
 
 NAN_METHOD(Connect) {
   Nan::HandleScope scope;
+  Local<String> path_string;
   sockaddr_un s;
   int err;
   int fd;
 
   assert(info.Length() == 2);
 
-  fd = Nan::To<int32_t>(info[0]).FromJust();
-  Nan::Utf8String path(info[1]);
+  if (!Nan::To<int32_t>(info[0]).To(&fd))
+    return;
+  if (!Nan::To<String>(info[1]).ToLocal(&path_string))
+    return;
+
+  Nan::Utf8String path(path_string);
 
   memset(&s, 0, sizeof(s));
   strncpy(s.sun_path, *path, sizeof(s.sun_path) - 1);
@@ -366,7 +395,9 @@ NAN_METHOD(Close) {
   int fd;
 
   assert(info.Length() == 1);
-  fd = Nan::To<int32_t>(info[0]).FromJust();
+
+  if (!Nan::To<int32_t>(info[0]).To(&fd))
+    return;
 
   // Suppress EINTR and EINPROGRESS.  EINTR means that the close() system call
   // was interrupted by a signal.  According to POSIX, the file descriptor is
