@@ -263,8 +263,12 @@ NAN_METHOD(SendTo) {
   length = Nan::To<uint32_t>(info[3]).FromJust();
   Nan::Utf8String path(info[4]);
 
-  assert(node::Buffer::HasInstance(buf));
-  assert(offset + length <= node::Buffer::Length(buf));
+  if (!node::Buffer::HasInstance(buf))
+    return Nan::ThrowTypeError("buf must be a Buffer");
+
+  const size_t buf_length = node::Buffer::Length(buf);
+  if (offset > buf_length || length > buf_length - offset)
+    return Nan::ThrowRangeError("offset and length are outside of the buffer");
 
   iov.iov_base = node::Buffer::Data(buf) + offset;
   iov.iov_len = length;
@@ -303,7 +307,9 @@ NAN_METHOD(Send) {
 
   fd = Nan::To<int32_t>(info[0]).FromJust();
   buf = Nan::To<Object>(info[1]).ToLocalChecked();
-  assert(node::Buffer::HasInstance(buf));
+
+  if (!node::Buffer::HasInstance(buf))
+    return Nan::ThrowTypeError("buf must be a Buffer");
 
   iov.iov_base = node::Buffer::Data(buf);
   iov.iov_len = node::Buffer::Length(buf);
